@@ -555,14 +555,9 @@ class ZohoMailClient:
         # Auto-detect region from email domain or use provided
         if region:
             self.region = region
-        elif email_address.endswith('.eu'):
-            self.region = 'eu'
-        elif email_address.endswith('.in'):
-            self.region = 'in'
-        elif email_address.endswith('.com.au'):
-            self.region = 'au'
         else:
-            self.region = 'eu'  # Default to EU
+            # Default to 'pro' for custom domains (Zoho Workplace)
+            self.region = 'pro'
     
     def connect(self):
         """Connect to Zoho IMAP server, try multiple regions if needed"""
