@@ -1132,12 +1132,83 @@ async def batch_search_emails(
                 # Filter to only emails with PDFs
                 emails_with_pdf = [e for e in all_emails[:5] if e.get("has_pdf")]
                 
+                # Calculate confidence score for each email
+                trans_date_parsed = None
+                if date_str:
+                    for fmt in ["%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y"]:
+                        try:
+                            trans_date_parsed = datetime.strptime(date_str.strip(), fmt)
+                            break
+                        except:
+                            continue
+                
+                for email_result in emails_with_pdf:
+                    confidence = 50  # Base confidence
+                    
+                    # Check vendor name match in subject or from
+                    email_subject = email_result.get("subject", "").lower()
+                    email_from = email_result.get("from", "").lower()
+                    vendor_lower = vendor_name.lower()
+                    
+                    if vendor_lower in email_subject:
+                        confidence += 25
+                    if vendor_lower in email_from:
+                        confidence += 15
+                    
+                    # Check date proximity
+                    email_date_str = email_result.get("date", "")
+                    if email_date_str and trans_date_parsed:
+                        try:
+                            from email.utils import parsedate_to_datetime
+                            email_date = parsedate_to_datetime(email_date_str)
+                            days_diff = abs((email_date.date() - trans_date_parsed.date()).days)
+                            
+                            if days_diff == 0:
+                                confidence += 10
+                            elif days_diff <= 1:
+                                confidence += 5
+                            elif days_diff > 5:
+                                confidence -= 10
+                        except:
+                            pass
+                    
+                    # Cap confidence at 95
+                    email_result["confidence"] = min(95, max(10, confidence))
+                
+                # Sort by confidence (highest first)
+                emails_with_pdf.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+                
+                # Get best match
+                best_match = emails_with_pdf[0] if emails_with_pdf else None
+                best_confidence = best_match.get("confidence", 0) if best_match else 0
+                
+                # Auto-update transaction status if found
+                if best_match and best_confidence >= 50:
+                    await db.transactions.update_one(
+                        {"id": trans["id"], "user_id": user["id"]},
+                        {"$set": {
+                            "status": "found",
+                            "search_confidence": best_confidence,
+                            "best_email_subject": best_match.get("subject", "")[:100]
+                        }}
+                    )
+                else:
+                    # Mark as not found
+                    await db.transactions.update_one(
+                        {"id": trans["id"], "user_id": user["id"]},
+                        {"$set": {
+                            "status": "manual",
+                            "search_confidence": 0
+                        }}
+                    )
+                
                 results.append({
                     "transaction_id": trans["id"],
                     "vendor": vendor_name,
                     "date": date_str,
                     "search_terms": search_terms[:5],
                     "found": len(emails_with_pdf) > 0,
+                    "confidence": best_confidence,
                     "emails": emails_with_pdf[:3],  # Limit to 3 results per transaction
                     "total_found": len(emails_with_pdf)
                 })
