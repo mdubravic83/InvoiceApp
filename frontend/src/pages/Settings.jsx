@@ -4,14 +4,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
+import { Switch } from '../components/ui/switch';
 import { 
-    Settings as SettingsIcon, 
     Mail, 
     Key, 
     CheckCircle2,
     AlertCircle,
     ExternalLink,
-    Loader2
+    Loader2,
+    Search,
+    Calendar
 } from 'lucide-react';
 import { settingsApi, emailApi } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -22,10 +24,15 @@ export default function Settings() {
     const { user, updateUser } = useAuth();
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [savingSearch, setSavingSearch] = useState(false);
     const [testing, setTesting] = useState(false);
     const [zohoConfig, setZohoConfig] = useState({
         zoho_email: '',
         zoho_app_password: '',
+    });
+    const [searchSettings, setSearchSettings] = useState({
+        date_range_days: 0,
+        search_all_fields: true,
     });
     const [isConfigured, setIsConfigured] = useState(false);
     const [connectionTested, setConnectionTested] = useState(false);
@@ -36,12 +43,19 @@ export default function Settings() {
 
     const loadSettings = async () => {
         try {
-            const response = await settingsApi.getZoho();
+            const [zohoRes, searchRes] = await Promise.all([
+                settingsApi.getZoho(),
+                settingsApi.getSearch()
+            ]);
             setZohoConfig({
-                zoho_email: response.data.zoho_email || '',
+                zoho_email: zohoRes.data.zoho_email || '',
                 zoho_app_password: '',
             });
-            setIsConfigured(response.data.zoho_configured);
+            setIsConfigured(zohoRes.data.zoho_configured);
+            setSearchSettings({
+                date_range_days: searchRes.data.date_range_days || 0,
+                search_all_fields: searchRes.data.search_all_fields !== false,
+            });
         } catch (err) {
             toast.error('Greška pri učitavanju postavki');
         } finally {
@@ -49,7 +63,7 @@ export default function Settings() {
         }
     };
 
-    const handleSave = async () => {
+    const handleSaveZoho = async () => {
         if (!zohoConfig.zoho_email) {
             toast.error('Unesite Zoho email');
             return;
@@ -66,7 +80,7 @@ export default function Settings() {
                 zoho_email: zohoConfig.zoho_email,
                 zoho_app_password: zohoConfig.zoho_app_password || 'unchanged',
             });
-            toast.success('Postavke spremljene');
+            toast.success('Zoho postavke spremljene');
             setIsConfigured(true);
             setConnectionTested(false);
             updateUser({ ...user, zoho_configured: true });
@@ -74,6 +88,18 @@ export default function Settings() {
             toast.error('Greška pri spremanju');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleSaveSearch = async () => {
+        setSavingSearch(true);
+        try {
+            await settingsApi.saveSearch(searchSettings);
+            toast.success('Postavke pretrage spremljene');
+        } catch (err) {
+            toast.error('Greška pri spremanju');
+        } finally {
+            setSavingSearch(false);
         }
     };
 
@@ -111,7 +137,7 @@ export default function Settings() {
                         Postavke
                     </h1>
                     <p className="text-muted-foreground mt-1">
-                        Konfigurirajte pristup vašem email računu
+                        Konfigurirajte email i postavke pretrage
                     </p>
                 </div>
 
@@ -193,21 +219,14 @@ export default function Settings() {
                             </div>
                         </div>
 
-                        <div className="flex items-center gap-2 p-3 bg-accent/10 text-accent rounded-md text-sm">
-                            <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                            <span>
-                                Koristite imap.zoho.eu za EU ili imap.zoho.com za US regiju.
-                            </span>
-                        </div>
-
                         <div className="flex gap-2">
                             <Button 
-                                onClick={handleSave} 
+                                onClick={handleSaveZoho} 
                                 disabled={saving}
                                 className="flex-1"
                                 data-testid="save-zoho-btn"
                             >
-                                {saving ? 'Spremanje...' : 'Spremi postavke'}
+                                {saving ? 'Spremanje...' : 'Spremi Zoho postavke'}
                             </Button>
                             <Button 
                                 variant="outline"
@@ -230,6 +249,81 @@ export default function Settings() {
                                 )}
                             </Button>
                         </div>
+                    </CardContent>
+                </Card>
+
+                {/* Search Settings */}
+                <Card className="bento-card">
+                    <CardHeader>
+                        <div className="flex items-center gap-3">
+                            <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                                <Search className="h-5 w-5 text-primary" />
+                            </div>
+                            <div>
+                                <CardTitle>Postavke pretrage</CardTitle>
+                                <CardDescription>
+                                    Konfigurirajte kako se pretražuju emailovi
+                                </CardDescription>
+                            </div>
+                        </div>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                        <div className="space-y-3">
+                            <Label htmlFor="date-range" className="flex items-center gap-2">
+                                <Calendar className="h-4 w-4" />
+                                Raspon dana za pretragu
+                            </Label>
+                            <div className="flex items-center gap-3">
+                                <Input
+                                    id="date-range"
+                                    type="number"
+                                    min="0"
+                                    max="30"
+                                    className="w-24"
+                                    value={searchSettings.date_range_days}
+                                    onChange={(e) => setSearchSettings({
+                                        ...searchSettings, 
+                                        date_range_days: parseInt(e.target.value) || 0
+                                    })}
+                                    data-testid="date-range-input"
+                                />
+                                <span className="text-sm text-muted-foreground">
+                                    dana prije i poslije datuma transakcije
+                                </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                                0 = pretraga samo na točan datum, 5 = ±5 dana od datuma transakcije
+                            </p>
+                        </div>
+
+                        <div className="flex items-center justify-between py-3 border-t">
+                            <div className="space-y-1">
+                                <Label htmlFor="search-all" className="cursor-pointer">
+                                    Pretraži po svim poljima
+                                </Label>
+                                <p className="text-xs text-muted-foreground">
+                                    Osim primatelja, pretraži i po opisu transakcije i napomeni
+                                </p>
+                            </div>
+                            <Switch
+                                id="search-all"
+                                checked={searchSettings.search_all_fields}
+                                onCheckedChange={(checked) => setSearchSettings({
+                                    ...searchSettings,
+                                    search_all_fields: checked
+                                })}
+                                data-testid="search-all-switch"
+                            />
+                        </div>
+
+                        <Button 
+                            onClick={handleSaveSearch} 
+                            disabled={savingSearch}
+                            className="w-full"
+                            data-testid="save-search-btn"
+                        >
+                            {savingSearch ? 'Spremanje...' : 'Spremi postavke pretrage'}
+                        </Button>
                     </CardContent>
                 </Card>
 
