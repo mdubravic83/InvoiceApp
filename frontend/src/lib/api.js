@@ -82,9 +82,16 @@ export const statsApi = {
 export const emailApi = {
     search: (vendorName, dateFrom, dateTo) => 
         api.post('/email/search', { vendor_name: vendorName, date_from: dateFrom, date_to: dateTo }),
+    batchSearch: (transactionIds) =>
+        api.post('/email/batch-search', { transaction_ids: transactionIds }),
     downloadAttachment: (emailId, filename, transactionId) =>
         api.post('/email/download-attachment', { email_id: emailId, filename, transaction_id: transactionId }),
     testConnection: () => api.get('/email/test-connection'),
+};
+
+// Invoices
+export const invoiceApi = {
+    download: (transactionId) => api.get(`/invoices/${transactionId}/download`, { responseType: 'blob' }),
 };
 
 // Export
