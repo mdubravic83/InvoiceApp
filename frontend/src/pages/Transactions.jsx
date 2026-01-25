@@ -38,7 +38,8 @@ import {
     Loader2,
     Calendar,
     SearchCheck,
-    File
+    File,
+    Trash2
 } from 'lucide-react';
 import { transactionApi, emailApi, exportApi, invoiceApi } from '../lib/api';
 import { toast } from 'sonner';
