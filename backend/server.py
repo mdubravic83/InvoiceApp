@@ -525,32 +525,373 @@ async def export_csv(batch_id: str, user: dict = Depends(get_current_user)):
         headers={"Content-Disposition": f"attachment; filename=racuni_{batch_id[:8]}.csv"}
     )
 
-# ============== ZOHO MAIL SEARCH (MOCK) ==============
-# Note: Real Zoho Mail integration requires OAuth setup
+# ============== ZOHO MAIL IMAP INTEGRATION ==============
+
+import imaplib
+import email
+from email.header import decode_header
+import base64
+
+# Directory for storing downloaded invoices
+INVOICES_DIR = ROOT_DIR / "invoices"
+INVOICES_DIR.mkdir(exist_ok=True)
+
+class ZohoMailClient:
+    """Zoho Mail IMAP Client for fetching emails and attachments"""
+    
+    IMAP_SERVER = "imap.zoho.eu"  # Use .com for US, .eu for Europe
+    IMAP_PORT = 993
+    
+    def __init__(self, email_address: str, app_password: str):
+        self.email_address = email_address
+        self.app_password = app_password
+        self.connection = None
+    
+    def connect(self):
+        """Connect to Zoho IMAP server"""
+        try:
+            self.connection = imaplib.IMAP4_SSL(self.IMAP_SERVER, self.IMAP_PORT)
+            self.connection.login(self.email_address, self.app_password)
+            return True
+        except imaplib.IMAP4.error as e:
+            logger.error(f"IMAP login failed: {e}")
+            raise HTTPException(status_code=401, detail=f"Greška pri prijavi na Zoho Mail: {str(e)}")
+    
+    def disconnect(self):
+        """Disconnect from IMAP server"""
+        if self.connection:
+            try:
+                self.connection.logout()
+            except:
+                pass
+    
+    def search_emails(self, search_term: str, date_from: str = None, date_to: str = None, folder: str = "INBOX"):
+        """Search for emails containing the search term"""
+        if not self.connection:
+            self.connect()
+        
+        self.connection.select(folder)
+        
+        # Build search criteria
+        search_criteria = []
+        
+        # Search in subject and from
+        if search_term:
+            # IMAP search is limited, we'll search by subject OR from
+            search_criteria.append(f'(OR SUBJECT "{search_term}" FROM "{search_term}")')
+        
+        if date_from:
+            search_criteria.append(f'SINCE {date_from}')
+        if date_to:
+            search_criteria.append(f'BEFORE {date_to}')
+        
+        search_string = ' '.join(search_criteria) if search_criteria else 'ALL'
+        
+        try:
+            # First try with search term
+            status, messages = self.connection.search(None, search_string)
+            if status != 'OK':
+                return []
+            
+            email_ids = messages[0].split()
+            # Limit to last 50 emails
+            email_ids = email_ids[-50:]
+            
+            results = []
+            for email_id in email_ids:
+                try:
+                    status, msg_data = self.connection.fetch(email_id, '(RFC822.HEADER)')
+                    if status != 'OK':
+                        continue
+                    
+                    for response_part in msg_data:
+                        if isinstance(response_part, tuple):
+                            msg = email.message_from_bytes(response_part[1])
+                            
+                            # Decode subject
+                            subject = ""
+                            if msg["Subject"]:
+                                decoded = decode_header(msg["Subject"])
+                                for part, encoding in decoded:
+                                    if isinstance(part, bytes):
+                                        subject += part.decode(encoding or 'utf-8', errors='ignore')
+                                    else:
+                                        subject += part
+                            
+                            # Get from address
+                            from_addr = msg.get("From", "")
+                            
+                            # Get date
+                            date_str = msg.get("Date", "")
+                            
+                            # Check if search term matches
+                            search_lower = search_term.lower()
+                            if search_lower in subject.lower() or search_lower in from_addr.lower():
+                                results.append({
+                                    "email_id": email_id.decode(),
+                                    "subject": subject,
+                                    "from": from_addr,
+                                    "date": date_str
+                                })
+                except Exception as e:
+                    logger.error(f"Error parsing email {email_id}: {e}")
+                    continue
+            
+            return results
+        except Exception as e:
+            logger.error(f"Search error: {e}")
+            return []
+    
+    def get_email_attachments(self, email_id: str, folder: str = "INBOX"):
+        """Get list of attachments from an email"""
+        if not self.connection:
+            self.connect()
+        
+        self.connection.select(folder)
+        
+        try:
+            status, msg_data = self.connection.fetch(email_id.encode(), '(RFC822)')
+            if status != 'OK':
+                return []
+            
+            attachments = []
+            for response_part in msg_data:
+                if isinstance(response_part, tuple):
+                    msg = email.message_from_bytes(response_part[1])
+                    
+                    for part in msg.walk():
+                        if part.get_content_maintype() == 'multipart':
+                            continue
+                        
+                        filename = part.get_filename()
+                        if filename:
+                            # Decode filename if needed
+                            decoded = decode_header(filename)
+                            decoded_filename = ""
+                            for part_text, encoding in decoded:
+                                if isinstance(part_text, bytes):
+                                    decoded_filename += part_text.decode(encoding or 'utf-8', errors='ignore')
+                                else:
+                                    decoded_filename += part_text
+                            
+                            content_type = part.get_content_type()
+                            attachments.append({
+                                "filename": decoded_filename,
+                                "content_type": content_type,
+                                "is_pdf": content_type == 'application/pdf' or decoded_filename.lower().endswith('.pdf')
+                            })
+            
+            return attachments
+        except Exception as e:
+            logger.error(f"Error getting attachments: {e}")
+            return []
+    
+    def download_attachment(self, email_id: str, attachment_filename: str, folder: str = "INBOX") -> Optional[bytes]:
+        """Download a specific attachment from an email"""
+        if not self.connection:
+            self.connect()
+        
+        self.connection.select(folder)
+        
+        try:
+            status, msg_data = self.connection.fetch(email_id.encode(), '(RFC822)')
+            if status != 'OK':
+                return None
+            
+            for response_part in msg_data:
+                if isinstance(response_part, tuple):
+                    msg = email.message_from_bytes(response_part[1])
+                    
+                    for part in msg.walk():
+                        if part.get_content_maintype() == 'multipart':
+                            continue
+                        
+                        filename = part.get_filename()
+                        if filename:
+                            decoded = decode_header(filename)
+                            decoded_filename = ""
+                            for part_text, enc in decoded:
+                                if isinstance(part_text, bytes):
+                                    decoded_filename += part_text.decode(enc or 'utf-8', errors='ignore')
+                                else:
+                                    decoded_filename += part_text
+                            
+                            if decoded_filename == attachment_filename:
+                                return part.get_payload(decode=True)
+            
+            return None
+        except Exception as e:
+            logger.error(f"Error downloading attachment: {e}")
+            return None
+
+
+class EmailSearchRequest(BaseModel):
+    vendor_name: str
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+
+class DownloadAttachmentRequest(BaseModel):
+    email_id: str
+    filename: str
+    transaction_id: str
 
 @api_router.post("/email/search")
 async def search_email(
-    vendor_name: str,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
+    request: EmailSearchRequest,
     user: dict = Depends(get_current_user)
 ):
-    """
-    Search for invoices in email.
-    Note: This is a placeholder - full Zoho Mail integration requires OAuth configuration.
-    """
-    if not user.get("zoho_email"):
+    """Search for invoices in Zoho Mail"""
+    if not user.get("zoho_email") or not user.get("zoho_app_password"):
         raise HTTPException(
             status_code=400,
             detail="Zoho email nije konfiguriran. Molimo konfigurirajte u postavkama."
         )
     
-    # For now, return mock data indicating the feature requires setup
-    return {
-        "message": "Za potpunu Zoho Mail integraciju potrebna je OAuth konfiguracija.",
-        "instructions": "Molimo konfigurirati Zoho API pristup za automatsko pretraživanje emailova.",
-        "results": []
-    }
+    try:
+        mail_client = ZohoMailClient(user["zoho_email"], user["zoho_app_password"])
+        mail_client.connect()
+        
+        results = mail_client.search_emails(
+            search_term=request.vendor_name,
+            date_from=request.date_from,
+            date_to=request.date_to
+        )
+        
+        # Get attachments info for each email
+        for result in results:
+            attachments = mail_client.get_email_attachments(result["email_id"])
+            result["attachments"] = attachments
+            result["has_pdf"] = any(a.get("is_pdf") for a in attachments)
+        
+        mail_client.disconnect()
+        
+        return {
+            "success": True,
+            "count": len(results),
+            "results": results
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Email search error: {e}")
+        raise HTTPException(status_code=500, detail=f"Greška pri pretraživanju emaila: {str(e)}")
+
+@api_router.post("/email/download-attachment")
+async def download_email_attachment(
+    request: DownloadAttachmentRequest,
+    user: dict = Depends(get_current_user)
+):
+    """Download attachment from email and save to transaction"""
+    if not user.get("zoho_email") or not user.get("zoho_app_password"):
+        raise HTTPException(
+            status_code=400,
+            detail="Zoho email nije konfiguriran."
+        )
+    
+    try:
+        mail_client = ZohoMailClient(user["zoho_email"], user["zoho_app_password"])
+        mail_client.connect()
+        
+        # Download attachment
+        attachment_data = mail_client.download_attachment(request.email_id, request.filename)
+        mail_client.disconnect()
+        
+        if not attachment_data:
+            raise HTTPException(status_code=404, detail="Privitak nije pronađen")
+        
+        # Save to file
+        safe_filename = re.sub(r'[^\w\-_\.]', '_', request.filename)
+        file_path = INVOICES_DIR / f"{user['id']}_{request.transaction_id}_{safe_filename}"
+        
+        with open(file_path, 'wb') as f:
+            f.write(attachment_data)
+        
+        # Update transaction
+        await db.transactions.update_one(
+            {"id": request.transaction_id, "user_id": user["id"]},
+            {"$set": {
+                "status": "downloaded",
+                "invoice_filename": safe_filename,
+                "invoice_path": str(file_path)
+            }}
+        )
+        
+        return {
+            "success": True,
+            "filename": safe_filename,
+            "message": "Račun uspješno preuzet"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Download attachment error: {e}")
+        raise HTTPException(status_code=500, detail=f"Greška pri preuzimanju: {str(e)}")
+
+@api_router.get("/email/test-connection")
+async def test_email_connection(user: dict = Depends(get_current_user)):
+    """Test Zoho Mail connection"""
+    if not user.get("zoho_email") or not user.get("zoho_app_password"):
+        raise HTTPException(
+            status_code=400,
+            detail="Zoho email nije konfiguriran."
+        )
+    
+    try:
+        mail_client = ZohoMailClient(user["zoho_email"], user["zoho_app_password"])
+        mail_client.connect()
+        mail_client.disconnect()
+        return {"success": True, "message": "Uspješno povezano na Zoho Mail!"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Greška pri povezivanju: {str(e)}")
+
+# ============== ZIP DOWNLOAD ==============
+
+@api_router.get("/export/zip/{batch_id}")
+async def export_zip(batch_id: str, user: dict = Depends(get_current_user)):
+    """Download all invoices from a batch as ZIP"""
+    transactions = await db.transactions.find(
+        {
+            "batch_id": batch_id, 
+            "user_id": user["id"],
+            "invoice_path": {"$exists": True, "$ne": None}
+        },
+        {"_id": 0}
+    ).to_list(10000)
+    
+    if not transactions:
+        raise HTTPException(status_code=404, detail="Nema preuzetih računa za download")
+    
+    # Create ZIP in memory
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for t in transactions:
+            invoice_path = t.get("invoice_path")
+            if invoice_path and os.path.exists(invoice_path):
+                # Create a nice filename
+                vendor_name = re.sub(r'[^\w\-_]', '_', t.get("primatelj", "unknown")[:30])
+                date_str = t.get("datum_izvrsenja", "").replace("-", "")
+                original_filename = t.get("invoice_filename", "racun.pdf")
+                ext = os.path.splitext(original_filename)[1] or ".pdf"
+                
+                archive_filename = f"{date_str}_{vendor_name}{ext}"
+                
+                with open(invoice_path, 'rb') as f:
+                    zip_file.writestr(archive_filename, f.read())
+    
+    zip_buffer.seek(0)
+    
+    # Get batch info for filename
+    batch = await db.batches.find_one({"id": batch_id, "user_id": user["id"]}, {"_id": 0})
+    batch_name = f"{batch['month']}_{batch['year']}" if batch else batch_id[:8]
+    
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=racuni_{batch_name}.zip"}
+    )
 
 # ============== ROOT ==============
 
