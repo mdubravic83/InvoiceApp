@@ -196,19 +196,40 @@ export default function Settings() {
                         <div className="flex items-center gap-2 p-3 bg-accent/10 text-accent rounded-md text-sm">
                             <AlertCircle className="h-4 w-4 flex-shrink-0" />
                             <span>
-                                Napomena: Za potpunu email integraciju potrebna je dodatna OAuth konfiguracija na serveru.
-                                Trenutno možete koristiti ručno preuzimanje računa putem vendor linkova.
+                                Koristite imap.zoho.eu za EU ili imap.zoho.com za US regiju.
                             </span>
                         </div>
 
-                        <Button 
-                            onClick={handleSave} 
-                            disabled={saving}
-                            className="w-full md:w-auto"
-                            data-testid="save-zoho-btn"
-                        >
-                            {saving ? 'Spremanje...' : 'Spremi postavke'}
-                        </Button>
+                        <div className="flex gap-2">
+                            <Button 
+                                onClick={handleSave} 
+                                disabled={saving}
+                                className="flex-1"
+                                data-testid="save-zoho-btn"
+                            >
+                                {saving ? 'Spremanje...' : 'Spremi postavke'}
+                            </Button>
+                            <Button 
+                                variant="outline"
+                                onClick={handleTestConnection} 
+                                disabled={testing || !isConfigured}
+                                data-testid="test-connection-btn"
+                            >
+                                {testing ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Testiranje...
+                                    </>
+                                ) : connectionTested ? (
+                                    <>
+                                        <CheckCircle2 className="h-4 w-4 mr-2 text-primary" />
+                                        Povezano
+                                    </>
+                                ) : (
+                                    'Testiraj vezu'
+                                )}
+                            </Button>
+                        </div>
                     </CardContent>
                 </Card>
 
