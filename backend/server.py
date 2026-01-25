@@ -604,13 +604,33 @@ class ZohoMailClient:
         
         self.connection.select(folder)
         
+        # Sanitize search term - remove special characters that break IMAP
+        import unicodedata
+        safe_search = ''.join(
+            c for c in search_term 
+            if unicodedata.category(c) not in ('Mn', 'Mc', 'Me') and ord(c) < 128
+        ).strip()
+        
+        # If nothing left after sanitization, use first word
+        if not safe_search and search_term:
+            words = search_term.split()
+            for word in words:
+                safe_word = ''.join(c for c in word if ord(c) < 128).strip()
+                if safe_word and len(safe_word) > 2:
+                    safe_search = safe_word
+                    break
+        
+        if not safe_search:
+            logger.warning(f"Could not create safe search term from: {search_term}")
+            return []
+        
         # Build search criteria
         search_criteria = []
         
         # Search in subject and from
-        if search_term:
+        if safe_search:
             # IMAP search is limited, we'll search by subject OR from
-            search_criteria.append(f'(OR SUBJECT "{search_term}" FROM "{search_term}")')
+            search_criteria.append(f'(OR SUBJECT "{safe_search}" FROM "{safe_search}")')
         
         if date_from:
             search_criteria.append(f'SINCE {date_from}')
@@ -626,8 +646,8 @@ class ZohoMailClient:
                 return []
             
             email_ids = messages[0].split()
-            # Limit to last 50 emails
-            email_ids = email_ids[-50:]
+            # Limit to last 20 emails for performance
+            email_ids = email_ids[-20:]
             
             results = []
             for email_id in email_ids:
