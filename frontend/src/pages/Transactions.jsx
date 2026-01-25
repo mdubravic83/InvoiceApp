@@ -519,7 +519,17 @@ export default function Transactions() {
                             data-testid="batch-search-btn"
                         >
                             <SearchCheck className="h-4 w-4 mr-2" />
-                            Batch pretraga ({selectedIds.size})
+                            Pretraga ({selectedIds.size})
+                        </Button>
+                        <Button
+                            variant="outline"
+                            onClick={() => setDeleteDialogOpen(true)}
+                            disabled={selectedIds.size === 0}
+                            className="text-destructive hover:text-destructive"
+                            data-testid="delete-selected-btn"
+                        >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Obriši ({selectedIds.size})
                         </Button>
                         <Button
                             variant="outline"
@@ -529,6 +539,16 @@ export default function Transactions() {
                         >
                             <FileDown className="h-4 w-4 mr-2" />
                             CSV
+                        </Button>
+                        <Button
+                            variant="outline"
+                            onClick={() => setDeleteBatchDialogOpen(true)}
+                            disabled={batchFilter === 'all'}
+                            className="text-destructive hover:text-destructive"
+                            data-testid="delete-batch-btn"
+                        >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Obriši batch
                         </Button>
                         <Button
                             onClick={handleExportZIP}
