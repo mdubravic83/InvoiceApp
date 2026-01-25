@@ -657,6 +657,7 @@ export default function Transactions() {
                                         <th className="text-left p-4 hidden lg:table-cell">Opis</th>
                                         <th className="text-right p-4">Iznos</th>
                                         <th className="text-center p-4">Status</th>
+                                        <th className="text-center p-4">Podudaranje</th>
                                         <th className="text-center p-4">Račun</th>
                                         <th className="text-right p-4">Akcije</th>
                                     </tr>
@@ -695,9 +696,26 @@ export default function Transactions() {
                                                 </span>
                                             </td>
                                             <td className="p-4 text-center">
-                                                <span className={cn("status-pill", getStatusClass(t.status))}>
-                                                    {getStatusLabel(t.status)}
+                                                <span className={cn(
+                                                    "status-pill",
+                                                    t.status === 'manual' && !t.invoice_path ? "bg-red-100 text-red-700" : getStatusClass(t.status)
+                                                )}>
+                                                    {t.status === 'manual' && !t.invoice_path ? 'Nije pronađeno' : getStatusLabel(t.status)}
                                                 </span>
+                                            </td>
+                                            <td className="p-4 text-center">
+                                                {t.search_confidence > 0 ? (
+                                                    <span className={cn(
+                                                        "text-sm font-medium",
+                                                        t.search_confidence >= 70 ? "text-green-600" :
+                                                        t.search_confidence >= 50 ? "text-yellow-600" :
+                                                        "text-red-600"
+                                                    )}>
+                                                        {t.search_confidence}%
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-muted-foreground text-sm">-</span>
+                                                )}
                                             </td>
                                             <td className="p-4 text-center">
                                                 {(t.status === 'downloaded' || t.invoice_path) && (
