@@ -322,7 +322,12 @@ class FinZenAPITester:
         
         # Email search mock test
         print("\n📧 Testing Email Integration...")
-        self.test_email_search_mock()
+        self.test_email_endpoints()
+        
+        # Export tests
+        print("\n📦 Testing Export Features...")
+        self.test_csv_export(batch_id)
+        self.test_zip_export(batch_id)
         
         return True
 
