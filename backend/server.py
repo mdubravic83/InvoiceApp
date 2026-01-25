@@ -71,6 +71,10 @@ class ZohoConfig(BaseModel):
     zoho_email: str
     zoho_app_password: str
 
+class SearchSettings(BaseModel):
+    date_range_days: int = 0  # 0 = exact day, 1+ = ± days
+    search_all_fields: bool = True  # Search in all transaction fields
+
 class VendorCreate(BaseModel):
     name: str
     keywords: List[str] = []
