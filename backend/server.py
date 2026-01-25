@@ -999,6 +999,10 @@ async def batch_search_emails(
             detail="Zoho email nije konfiguriran. Molimo konfigurirajte u postavkama."
         )
     
+    # Get user's search settings
+    date_range_days = user.get("date_range_days", 0)
+    search_all_fields = user.get("search_all_fields", True)
+    
     # Limit batch size to prevent timeout
     MAX_BATCH_SIZE = 15
     transaction_ids = request.transaction_ids[:MAX_BATCH_SIZE]
@@ -1022,37 +1026,50 @@ async def batch_search_emails(
         results = []
         for idx, trans in enumerate(transactions):
             try:
-                # Parse date for search range (search on exact date)
+                # Parse date for search range
                 date_str = trans.get("datum_izvrsenja", "")
                 date_from = None
                 date_to = None
                 
                 if date_str:
                     try:
-                        # Try to parse date and create range
                         from datetime import datetime, timedelta
                         # Handle various date formats
                         for fmt in ["%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y"]:
                             try:
                                 trans_date = datetime.strptime(date_str.strip(), fmt)
-                                # Search on exact day (from that day to next day)
-                                date_from = trans_date.strftime("%d-%b-%Y")
-                                date_to = (trans_date + timedelta(days=1)).strftime("%d-%b-%Y")
+                                # Apply date range setting
+                                date_from = (trans_date - timedelta(days=date_range_days)).strftime("%d-%b-%Y")
+                                date_to = (trans_date + timedelta(days=date_range_days + 1)).strftime("%d-%b-%Y")
                                 break
                             except:
                                 continue
                     except:
                         pass
                 
-                vendor_name = trans.get("primatelj", "")
-                if not vendor_name:
+                # Build search terms from all relevant fields
+                search_terms = []
+                vendor_name = trans.get("primatelj", "").strip()
+                
+                if vendor_name:
+                    search_terms.append(vendor_name)
+                
+                if search_all_fields:
+                    # Add other fields to search
+                    opis = trans.get("opis_transakcije", "").strip()
+                    if opis and len(opis) > 3:
+                        # Extract meaningful words from description
+                        words = [w for w in opis.split() if len(w) > 3 and not w.replace('.', '').replace(',', '').isdigit()]
+                        search_terms.extend(words[:3])  # Max 3 words from description
+                
+                if not search_terms:
                     results.append({
                         "transaction_id": trans["id"],
                         "vendor": vendor_name,
                         "date": date_str,
                         "found": False,
                         "emails": [],
-                        "error": "Nema naziva primatelja"
+                        "error": "Nema podataka za pretragu"
                     })
                     continue
                 
