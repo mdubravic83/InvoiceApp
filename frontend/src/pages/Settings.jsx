@@ -10,9 +10,10 @@ import {
     Key, 
     CheckCircle2,
     AlertCircle,
-    ExternalLink
+    ExternalLink,
+    Loader2
 } from 'lucide-react';
-import { settingsApi } from '../lib/api';
+import { settingsApi, emailApi } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
