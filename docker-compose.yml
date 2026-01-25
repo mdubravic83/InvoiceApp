@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:6
+    container_name: finzen-mongodb
+    restart: always
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=finzen
+    networks:
+      - finzen-network
+    # Uncomment below for MongoDB authentication (recommended for production)
+    # environment:
+    #   - MONGO_INITDB_ROOT_USERNAME=admin
+    #   - MONGO_INITDB_ROOT_PASSWORD=your_secure_password
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: finzen-backend
+    restart: always
+    depends_on:
+      - mongodb
+    environment:
+      - MONGO_URL=mongodb://mongodb:27017
+      - DB_NAME=finzen
+      - JWT_SECRET=${JWT_SECRET:-change-this-secret-in-production}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+    volumes:
+      - invoices_data:/app/invoices
+    networks:
+      - finzen-network
+    # Internal port - not exposed directly, accessed via nginx
+
+  # React Frontend + Nginx Reverse Proxy
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - REACT_APP_BACKEND_URL=${PUBLIC_URL:-http://localhost}/api
+    container_name: finzen-frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "${PORT:-80}:80"
+    networks:
+      - finzen-network
+
+  # Nginx Reverse Proxy (combines frontend + backend)
+  nginx:
+    image: nginx:alpine
+    container_name: finzen-nginx
+    restart: always
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      - "${PORT:-80}:80"
+      - "${SSL_PORT:-443}:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro  # For SSL certificates
+    networks:
+      - finzen-network
+
+volumes:
+  mongodb_data:
+    driver: local
+  invoices_data:
+    driver: local
+
+networks:
+  finzen-network:
+    driver: bridge
