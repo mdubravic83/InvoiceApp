@@ -246,6 +246,24 @@ async def get_zoho_config(user: dict = Depends(get_current_user)):
         "zoho_configured": bool(user.get("zoho_email"))
     }
 
+@api_router.post("/settings/search")
+async def save_search_settings(settings: SearchSettings, user: dict = Depends(get_current_user)):
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {
+            "date_range_days": settings.date_range_days,
+            "search_all_fields": settings.search_all_fields
+        }}
+    )
+    return {"message": "Postavke pretrage spremljene"}
+
+@api_router.get("/settings/search")
+async def get_search_settings(user: dict = Depends(get_current_user)):
+    return {
+        "date_range_days": user.get("date_range_days", 0),
+        "search_all_fields": user.get("search_all_fields", True)
+    }
+
 # ============== VENDOR ROUTES ==============
 
 @api_router.post("/vendors", response_model=VendorResponse)
