@@ -63,6 +63,7 @@ export const transactionApi = {
         });
     },
     getBatches: () => api.get('/batches'),
+    deleteBatch: (batchId) => api.delete(`/batches/${batchId}`),
     getAll: (batchId, status) => {
         const params = new URLSearchParams();
         if (batchId) params.append('batch_id', batchId);
@@ -70,6 +71,8 @@ export const transactionApi = {
         return api.get(`/transactions?${params.toString()}`);
     },
     update: (id, data) => api.put(`/transactions/${id}`, data),
+    delete: (id) => api.delete(`/transactions/${id}`),
+    deleteBatchTransactions: (ids) => api.post('/transactions/delete-batch', { transaction_ids: ids }),
     exportCSV: (batchId) => api.get(`/export/csv/${batchId}`, { responseType: 'blob' }),
 };
 
