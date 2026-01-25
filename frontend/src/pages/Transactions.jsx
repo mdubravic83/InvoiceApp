@@ -4,6 +4,7 @@ import { Layout } from '../components/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
+import { Checkbox } from '../components/ui/checkbox';
 import { 
     Select,
     SelectContent,
@@ -21,6 +22,7 @@ import {
 } from '../components/ui/dialog';
 import { Label } from '../components/ui/label';
 import { ScrollArea } from '../components/ui/scroll-area';
+import { Progress } from '../components/ui/progress';
 import { 
     FileText, 
     Search, 
@@ -33,9 +35,12 @@ import {
     Mail,
     FileDown,
     Archive,
-    Loader2
+    Loader2,
+    Calendar,
+    SearchCheck,
+    File
 } from 'lucide-react';
-import { transactionApi, emailApi, exportApi } from '../lib/api';
+import { transactionApi, emailApi, exportApi, invoiceApi } from '../lib/api';
 import { toast } from 'sonner';
 import { cn, getStatusLabel, getStatusClass } from '../lib/utils';
 
@@ -53,11 +58,21 @@ export default function Transactions() {
     const [uploading, setUploading] = useState(false);
     const [dragActive, setDragActive] = useState(false);
     
+    // Selection state for batch operations
+    const [selectedIds, setSelectedIds] = useState(new Set());
+    const [selectAll, setSelectAll] = useState(false);
+    
     // Email search state
     const [emailSearchOpen, setEmailSearchOpen] = useState(false);
     const [emailSearching, setEmailSearching] = useState(false);
     const [emailResults, setEmailResults] = useState([]);
     const [downloadingAttachment, setDownloadingAttachment] = useState(null);
+    
+    // Batch search state
+    const [batchSearchOpen, setBatchSearchOpen] = useState(false);
+    const [batchSearching, setBatchSearching] = useState(false);
+    const [batchSearchResults, setBatchSearchResults] = useState([]);
+    const [batchSearchProgress, setBatchSearchProgress] = useState(0);
 
     const loadData = useCallback(async () => {
         try {
@@ -70,6 +85,8 @@ export default function Transactions() {
             ]);
             setTransactions(transRes.data);
             setBatches(batchesRes.data);
+            setSelectedIds(new Set());
+            setSelectAll(false);
         } catch (err) {
             toast.error('Greška pri učitavanju transakcija');
         } finally {
@@ -138,6 +155,29 @@ export default function Transactions() {
             t.opis_transakcije?.toLowerCase().includes(searchTerm.toLowerCase());
         return matchesSearch;
     });
+
+    // Selection handlers
+    const handleSelectAll = (checked) => {
+        setSelectAll(checked);
+        if (checked) {
+            const pendingIds = filteredTransactions
+                .filter(t => t.status === 'pending')
+                .map(t => t.id);
+            setSelectedIds(new Set(pendingIds));
+        } else {
+            setSelectedIds(new Set());
+        }
+    };
+
+    const handleSelectOne = (id, checked) => {
+        const newSelected = new Set(selectedIds);
+        if (checked) {
+            newSelected.add(id);
+        } else {
+            newSelected.delete(id);
+        }
+        setSelectedIds(newSelected);
+    };
 
     const handleUpdateClick = (transaction) => {
         setSelectedTransaction(transaction);
@@ -216,7 +256,24 @@ export default function Transactions() {
         }
     };
 
-    // Email search functions
+    // Download saved invoice
+    const handleDownloadInvoice = async (transaction) => {
+        try {
+            const response = await invoiceApi.download(transaction.id);
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', transaction.invoice_filename || 'racun.pdf');
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (err) {
+            toast.error('Greška pri preuzimanju računa');
+        }
+    };
+
+    // Single email search
     const handleEmailSearchClick = (transaction) => {
         setSelectedTransaction(transaction);
         setEmailResults([]);
@@ -228,7 +285,48 @@ export default function Transactions() {
 
         setEmailSearching(true);
         try {
-            const response = await emailApi.search(selectedTransaction.primatelj);
+            // Calculate date range from transaction date
+            let dateFrom = null;
+            let dateTo = null;
+            const dateStr = selectedTransaction.datum_izvrsenja;
+            
+            if (dateStr) {
+                try {
+                    // Parse date and create range
+                    const formats = [
+                        { regex: /(\d{4})-(\d{2})-(\d{2})/, order: [1, 2, 3] },
+                        { regex: /(\d{2})\.(\d{2})\.(\d{4})/, order: [3, 2, 1] },
+                        { regex: /(\d{2})\/(\d{2})\/(\d{4})/, order: [3, 2, 1] },
+                    ];
+                    
+                    for (const fmt of formats) {
+                        const match = dateStr.match(fmt.regex);
+                        if (match) {
+                            const year = match[fmt.order[0]];
+                            const month = match[fmt.order[1]];
+                            const day = match[fmt.order[2]];
+                            const transDate = new Date(year, month - 1, day);
+                            
+                            const fromDate = new Date(transDate);
+                            fromDate.setDate(fromDate.getDate() - 5);
+                            const toDate = new Date(transDate);
+                            toDate.setDate(toDate.getDate() + 5);
+                            
+                            dateFrom = fromDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
+                            dateTo = toDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
+                            break;
+                        }
+                    }
+                } catch (e) {
+                    console.error('Date parse error:', e);
+                }
+            }
+
+            const response = await emailApi.search(
+                selectedTransaction.primatelj,
+                dateFrom,
+                dateTo
+            );
             setEmailResults(response.data.results || []);
             if (response.data.results?.length === 0) {
                 toast.info('Nisu pronađeni emailovi za ovog dobavljača');
@@ -262,6 +360,62 @@ export default function Transactions() {
         }
     };
 
+    // Batch search
+    const handleBatchSearch = async () => {
+        if (selectedIds.size === 0) {
+            toast.error('Odaberite transakcije za pretragu');
+            return;
+        }
+
+        setBatchSearchResults([]);
+        setBatchSearchProgress(0);
+        setBatchSearching(true);
+        setBatchSearchOpen(true);
+
+        try {
+            const response = await emailApi.batchSearch(Array.from(selectedIds));
+            setBatchSearchResults(response.data.results || []);
+            setBatchSearchProgress(100);
+            
+            const foundCount = response.data.found_count || 0;
+            toast.success(`Pronađeno ${foundCount} od ${response.data.total_transactions} računa`);
+        } catch (err) {
+            const message = err.response?.data?.detail || 'Greška pri pretraživanju';
+            toast.error(message);
+            setBatchSearchOpen(false);
+        } finally {
+            setBatchSearching(false);
+        }
+    };
+
+    const handleBatchDownloadAttachment = async (result, emailData, attachment) => {
+        const key = `${result.transaction_id}-${emailData.email_id}-${attachment.filename}`;
+        setDownloadingAttachment(key);
+        
+        try {
+            await emailApi.downloadAttachment(
+                emailData.email_id,
+                attachment.filename,
+                result.transaction_id
+            );
+            toast.success(`Račun preuzet za ${result.vendor}`);
+            
+            // Update result to show downloaded
+            setBatchSearchResults(prev => prev.map(r => {
+                if (r.transaction_id === result.transaction_id) {
+                    return { ...r, downloaded: true };
+                }
+                return r;
+            }));
+            
+            await loadData();
+        } catch (err) {
+            toast.error('Greška pri preuzimanju');
+        } finally {
+            setDownloadingAttachment(null);
+        }
+    };
+
     if (loading) {
         return (
             <Layout>
@@ -271,6 +425,8 @@ export default function Transactions() {
             </Layout>
         );
     }
+
+    const pendingCount = filteredTransactions.filter(t => t.status === 'pending').length;
 
     return (
         <Layout>
@@ -305,6 +461,15 @@ export default function Transactions() {
                         />
                         <Button
                             variant="outline"
+                            onClick={handleBatchSearch}
+                            disabled={selectedIds.size === 0}
+                            data-testid="batch-search-btn"
+                        >
+                            <SearchCheck className="h-4 w-4 mr-2" />
+                            Batch pretraga ({selectedIds.size})
+                        </Button>
+                        <Button
+                            variant="outline"
                             onClick={handleExportCSV}
                             disabled={batchFilter === 'all'}
                             data-testid="export-csv-btn"
@@ -318,7 +483,7 @@ export default function Transactions() {
                             data-testid="export-zip-btn"
                         >
                             <Archive className="h-4 w-4 mr-2" />
-                            ZIP Računi
+                            ZIP
                         </Button>
                     </div>
                 </div>
@@ -401,27 +566,50 @@ export default function Transactions() {
                             <table className="w-full data-table">
                                 <thead>
                                     <tr>
-                                        <th className="text-left p-4">Datum</th>
+                                        <th className="w-10 p-4">
+                                            <Checkbox 
+                                                checked={selectAll}
+                                                onCheckedChange={handleSelectAll}
+                                                disabled={pendingCount === 0}
+                                                data-testid="select-all-checkbox"
+                                            />
+                                        </th>
+                                        <th className="text-left p-4">
+                                            <div className="flex items-center gap-1">
+                                                <Calendar className="h-4 w-4" />
+                                                Datum
+                                            </div>
+                                        </th>
                                         <th className="text-left p-4">Primatelj</th>
-                                        <th className="text-left p-4 hidden md:table-cell">Opis</th>
+                                        <th className="text-left p-4 hidden lg:table-cell">Opis</th>
                                         <th className="text-right p-4">Iznos</th>
                                         <th className="text-center p-4">Status</th>
+                                        <th className="text-center p-4">Račun</th>
                                         <th className="text-right p-4">Akcije</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {filteredTransactions.map((t, idx) => (
                                         <tr key={t.id} className={`animate-fade-in stagger-${Math.min(idx + 1, 4)}`}>
-                                            <td className="p-4 text-sm whitespace-nowrap">
-                                                {t.datum_izvrsenja}
+                                            <td className="p-4">
+                                                {t.status === 'pending' && (
+                                                    <Checkbox 
+                                                        checked={selectedIds.has(t.id)}
+                                                        onCheckedChange={(checked) => handleSelectOne(t.id, checked)}
+                                                        data-testid={`select-${t.id}`}
+                                                    />
+                                                )}
+                                            </td>
+                                            <td className="p-4 text-sm whitespace-nowrap font-mono">
+                                                {t.datum_izvrsenja || '-'}
                                             </td>
                                             <td className="p-4">
                                                 <span className="font-medium text-sm">
                                                     {t.primatelj || 'Nepoznato'}
                                                 </span>
                                             </td>
-                                            <td className="p-4 hidden md:table-cell">
-                                                <span className="text-sm text-muted-foreground truncate block max-w-[300px]">
+                                            <td className="p-4 hidden lg:table-cell">
+                                                <span className="text-sm text-muted-foreground truncate block max-w-[250px]">
                                                     {t.opis_transakcije}
                                                 </span>
                                             </td>
@@ -437,6 +625,32 @@ export default function Transactions() {
                                                 <span className={cn("status-pill", getStatusClass(t.status))}>
                                                     {getStatusLabel(t.status)}
                                                 </span>
+                                            </td>
+                                            <td className="p-4 text-center">
+                                                {(t.status === 'downloaded' || t.invoice_path) && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-8 w-8 p-0"
+                                                        onClick={() => handleDownloadInvoice(t)}
+                                                        title="Preuzmi račun"
+                                                        data-testid={`download-invoice-${t.id}`}
+                                                    >
+                                                        <File className="h-4 w-4 text-primary" />
+                                                    </Button>
+                                                )}
+                                                {t.invoice_url && !t.invoice_path && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-8 w-8 p-0"
+                                                        onClick={() => window.open(t.invoice_url, '_blank')}
+                                                        title="Otvori link računa"
+                                                        data-testid={`open-invoice-url-${t.id}`}
+                                                    >
+                                                        <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                                                    </Button>
+                                                )}
                                             </td>
                                             <td className="p-4 text-right">
                                                 <div className="flex items-center justify-end gap-1">
@@ -467,24 +681,12 @@ export default function Transactions() {
                                                                 size="sm"
                                                                 className="h-8 w-8 p-0"
                                                                 onClick={() => handleQuickStatus(t, 'manual')}
-                                                                title="Označi za ručno preuzimanje"
+                                                                title="Označi za ručno"
                                                                 data-testid={`mark-manual-${t.id}`}
                                                             >
                                                                 <X className="h-4 w-4 text-accent" />
                                                             </Button>
                                                         </>
-                                                    )}
-                                                    {t.invoice_url && (
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            className="h-8 w-8 p-0"
-                                                            onClick={() => window.open(t.invoice_url, '_blank')}
-                                                            title="Otvori link računa"
-                                                            data-testid={`open-invoice-${t.id}`}
-                                                        >
-                                                            <ExternalLink className="h-4 w-4" />
-                                                        </Button>
                                                     )}
                                                     <Button
                                                         variant="outline"
@@ -566,7 +768,7 @@ export default function Transactions() {
                 </DialogContent>
             </Dialog>
 
-            {/* Email Search Dialog */}
+            {/* Single Email Search Dialog */}
             <Dialog open={emailSearchOpen} onOpenChange={setEmailSearchOpen}>
                 <DialogContent className="max-w-2xl">
                     <DialogHeader>
@@ -575,7 +777,7 @@ export default function Transactions() {
                             Pretraži email za račun
                         </DialogTitle>
                         <DialogDescription>
-                            Pretraživanje za: <strong>{selectedTransaction?.primatelj}</strong>
+                            <strong>{selectedTransaction?.primatelj}</strong> | Datum: <strong>{selectedTransaction?.datum_izvrsenja}</strong>
                         </DialogDescription>
                     </DialogHeader>
                     
@@ -594,7 +796,7 @@ export default function Transactions() {
                             ) : (
                                 <>
                                     <Search className="h-4 w-4 mr-2" />
-                                    Pretraži emailove
+                                    Pretraži emailove (±5 dana od datuma)
                                 </>
                             )}
                         </Button>
@@ -642,7 +844,6 @@ export default function Transactions() {
                                                             {att.is_pdf && (
                                                                 <Button
                                                                     size="sm"
-                                                                    variant="outline"
                                                                     onClick={() => handleDownloadAttachment(email.email_id, att.filename)}
                                                                     disabled={downloadingAttachment === `${email.email_id}-${att.filename}`}
                                                                     data-testid={`download-attachment-${idx}-${attIdx}`}
@@ -650,7 +851,10 @@ export default function Transactions() {
                                                                     {downloadingAttachment === `${email.email_id}-${att.filename}` ? (
                                                                         <Loader2 className="h-3 w-3 animate-spin" />
                                                                     ) : (
-                                                                        <Download className="h-3 w-3" />
+                                                                        <>
+                                                                            <Download className="h-3 w-3 mr-1" />
+                                                                            Preuzmi
+                                                                        </>
                                                                     )}
                                                                 </Button>
                                                             )}
@@ -674,6 +878,118 @@ export default function Transactions() {
 
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setEmailSearchOpen(false)}>
+                            Zatvori
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Batch Search Dialog */}
+            <Dialog open={batchSearchOpen} onOpenChange={setBatchSearchOpen}>
+                <DialogContent className="max-w-3xl max-h-[80vh]">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <SearchCheck className="h-5 w-5" />
+                            Batch pretraga računa
+                        </DialogTitle>
+                        <DialogDescription>
+                            Pretraživanje {selectedIds.size} transakcija
+                        </DialogDescription>
+                    </DialogHeader>
+                    
+                    <div className="py-4">
+                        {batchSearching && (
+                            <div className="space-y-2">
+                                <Progress value={batchSearchProgress} className="h-2" />
+                                <p className="text-sm text-center text-muted-foreground">
+                                    <Loader2 className="h-4 w-4 inline animate-spin mr-2" />
+                                    Pretraživanje emailova...
+                                </p>
+                            </div>
+                        )}
+
+                        {!batchSearching && batchSearchResults.length > 0 && (
+                            <ScrollArea className="h-[400px] rounded-md border">
+                                <div className="p-4 space-y-3">
+                                    {batchSearchResults.map((result, idx) => (
+                                        <div 
+                                            key={idx}
+                                            className={cn(
+                                                "p-3 rounded-lg border",
+                                                result.found ? "bg-primary/5 border-primary/20" : "bg-muted/50",
+                                                result.downloaded && "bg-green-50 border-green-200"
+                                            )}
+                                        >
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="font-medium text-sm">
+                                                            {result.vendor}
+                                                        </p>
+                                                        {result.downloaded ? (
+                                                            <span className="status-pill status-downloaded text-xs">
+                                                                <Check className="h-3 w-3 mr-1" />
+                                                                Preuzet
+                                                            </span>
+                                                        ) : result.found ? (
+                                                            <span className="status-pill status-found text-xs">
+                                                                Pronađen ({result.total_found})
+                                                            </span>
+                                                        ) : (
+                                                            <span className="status-pill status-pending text-xs">
+                                                                Nije pronađen
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-xs text-muted-foreground">
+                                                        Datum: {result.date}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            
+                                            {result.found && !result.downloaded && result.emails?.length > 0 && (
+                                                <div className="mt-2 space-y-2">
+                                                    {result.emails.slice(0, 2).map((email, emailIdx) => (
+                                                        <div key={emailIdx} className="p-2 bg-background rounded text-xs">
+                                                            <p className="font-medium truncate">{email.subject}</p>
+                                                            <p className="text-muted-foreground">{email.date}</p>
+                                                            {email.attachments?.filter(a => a.is_pdf).map((att, attIdx) => (
+                                                                <div key={attIdx} className="flex items-center justify-between mt-1">
+                                                                    <span className="truncate">{att.filename}</span>
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="outline"
+                                                                        onClick={() => handleBatchDownloadAttachment(result, email, att)}
+                                                                        disabled={downloadingAttachment === `${result.transaction_id}-${email.email_id}-${att.filename}`}
+                                                                    >
+                                                                        {downloadingAttachment === `${result.transaction_id}-${email.email_id}-${att.filename}` ? (
+                                                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                                                        ) : (
+                                                                            <>
+                                                                                <Download className="h-3 w-3 mr-1" />
+                                                                                Preuzmi
+                                                                            </>
+                                                                        )}
+                                                                    </Button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            
+                                            {result.error && (
+                                                <p className="text-xs text-destructive mt-1">{result.error}</p>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            </ScrollArea>
+                        )}
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setBatchSearchOpen(false)}>
                             Zatvori
                         </Button>
                     </DialogFooter>
