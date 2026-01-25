@@ -969,42 +969,54 @@ async def batch_search_emails(
                         "error": "Nema naziva primatelja"
                     })
                     continue
-                    "error": "Nema naziva primatelja"
+                
+                # Search for emails
+                emails = mail_client.search_emails(
+                    search_term=vendor_name,
+                    date_from=date_from,
+                    date_to=date_to
+                )
+                
+                # Get attachments for emails with PDF (limit to first 3 for performance)
+                for email_result in emails[:3]:
+                    attachments = mail_client.get_email_attachments(email_result["email_id"])
+                    email_result["attachments"] = attachments
+                    email_result["has_pdf"] = any(a.get("is_pdf") for a in attachments)
+                
+                # Filter to only emails with PDFs
+                emails_with_pdf = [e for e in emails[:3] if e.get("has_pdf")]
+                
+                results.append({
+                    "transaction_id": trans["id"],
+                    "vendor": vendor_name,
+                    "date": date_str,
+                    "found": len(emails_with_pdf) > 0,
+                    "emails": emails_with_pdf[:2],  # Limit to 2 results per transaction
+                    "total_found": len(emails_with_pdf)
                 })
-                continue
-            
-            # Search for emails
-            emails = mail_client.search_emails(
-                search_term=vendor_name,
-                date_from=date_from,
-                date_to=date_to
-            )
-            
-            # Get attachments for emails with PDF
-            for email_result in emails:
-                attachments = mail_client.get_email_attachments(email_result["email_id"])
-                email_result["attachments"] = attachments
-                email_result["has_pdf"] = any(a.get("is_pdf") for a in attachments)
-            
-            # Filter to only emails with PDFs
-            emails_with_pdf = [e for e in emails if e.get("has_pdf")]
-            
-            results.append({
-                "transaction_id": trans["id"],
-                "vendor": vendor_name,
-                "date": date_str,
-                "found": len(emails_with_pdf) > 0,
-                "emails": emails_with_pdf[:5],  # Limit to 5 results per transaction
-                "total_found": len(emails_with_pdf)
-            })
+                
+            except Exception as trans_error:
+                logger.error(f"Error searching for transaction {trans.get('id')}: {trans_error}")
+                results.append({
+                    "transaction_id": trans["id"],
+                    "vendor": trans.get("primatelj", ""),
+                    "date": trans.get("datum_izvrsenja", ""),
+                    "found": False,
+                    "emails": [],
+                    "error": "Greška pri pretrazi"
+                })
         
         mail_client.disconnect()
         
-        found_count = sum(1 for r in results if r["found"])
+        found_count = sum(1 for r in results if r.get("found"))
+        skipped = len(request.transaction_ids) - len(transaction_ids)
+        
         return {
             "success": True,
             "total_transactions": len(results),
             "found_count": found_count,
+            "skipped": skipped,
+            "max_batch_size": MAX_BATCH_SIZE,
             "results": results
         }
     except HTTPException:
