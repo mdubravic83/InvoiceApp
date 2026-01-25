@@ -1007,13 +1007,13 @@ export default function Transactions() {
                                             key={idx}
                                             className={cn(
                                                 "p-3 rounded-lg border",
-                                                result.found ? "bg-primary/5 border-primary/20" : "bg-muted/50",
+                                                result.found ? "bg-primary/5 border-primary/20" : "bg-red-50 border-red-200",
                                                 result.downloaded && "bg-green-50 border-green-200"
                                             )}
                                         >
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-2 flex-wrap">
                                                         <p className="font-medium text-sm">
                                                             {result.vendor}
                                                         </p>
@@ -1027,8 +1027,18 @@ export default function Transactions() {
                                                                 Pronađen ({result.total_found})
                                                             </span>
                                                         ) : (
-                                                            <span className="status-pill status-pending text-xs">
-                                                                Nije pronađen
+                                                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                                                                Nije pronađeno
+                                                            </span>
+                                                        )}
+                                                        {result.confidence > 0 && (
+                                                            <span className={cn(
+                                                                "px-2 py-1 rounded-full text-xs font-medium",
+                                                                result.confidence >= 70 ? "bg-green-100 text-green-700" :
+                                                                result.confidence >= 50 ? "bg-yellow-100 text-yellow-700" :
+                                                                "bg-red-100 text-red-700"
+                                                            )}>
+                                                                {result.confidence}% podudaranje
                                                             </span>
                                                         )}
                                                     </div>
@@ -1042,14 +1052,25 @@ export default function Transactions() {
                                                 <div className="mt-2 space-y-2">
                                                     {result.emails.slice(0, 2).map((email, emailIdx) => (
                                                         <div key={emailIdx} className="p-2 bg-background rounded text-xs">
-                                                            <p className="font-medium truncate">{email.subject}</p>
+                                                            <div className="flex items-center justify-between">
+                                                                <p className="font-medium truncate flex-1">{email.subject}</p>
+                                                                {email.confidence && (
+                                                                    <span className={cn(
+                                                                        "ml-2 px-1.5 py-0.5 rounded text-xs",
+                                                                        email.confidence >= 70 ? "bg-green-100 text-green-700" :
+                                                                        email.confidence >= 50 ? "bg-yellow-100 text-yellow-700" :
+                                                                        "bg-red-100 text-red-700"
+                                                                    )}>
+                                                                        {email.confidence}%
+                                                                    </span>
+                                                                )}
+                                                            </div>
                                                             <p className="text-muted-foreground">{email.date}</p>
                                                             {email.attachments?.filter(a => a.is_pdf).map((att, attIdx) => (
                                                                 <div key={attIdx} className="flex items-center justify-between mt-1">
                                                                     <span className="truncate">{att.filename}</span>
                                                                     <Button
                                                                         size="sm"
-                                                                        variant="outline"
                                                                         onClick={() => handleBatchDownloadAttachment(result, email, att)}
                                                                         disabled={downloadingAttachment === `${result.transaction_id}-${email.email_id}-${att.filename}`}
                                                                     >
