@@ -540,6 +540,7 @@ class ZohoMailClient:
     """Zoho Mail IMAP Client for fetching emails and attachments"""
     
     IMAP_SERVERS = {
+        "pro": "imappro.zoho.com",  # Zoho Workplace/Pro accounts
         "eu": "imap.zoho.eu",
         "com": "imap.zoho.com", 
         "in": "imap.zoho.in",
