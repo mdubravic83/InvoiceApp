@@ -434,6 +434,40 @@ async def update_transaction(
         transaction['created_at'] = datetime.fromisoformat(transaction['created_at'])
     return TransactionResponse(**transaction)
 
+@api_router.delete("/transactions/{transaction_id}")
+async def delete_transaction(transaction_id: str, user: dict = Depends(get_current_user)):
+    """Delete a single transaction"""
+    result = await db.transactions.delete_one({"id": transaction_id, "user_id": user["id"]})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Transakcija nije pronađena")
+    return {"message": "Transakcija obrisana"}
+
+class DeleteTransactionsRequest(BaseModel):
+    transaction_ids: List[str]
+
+@api_router.post("/transactions/delete-batch")
+async def delete_transactions_batch(request: DeleteTransactionsRequest, user: dict = Depends(get_current_user)):
+    """Delete multiple transactions"""
+    result = await db.transactions.delete_many({
+        "id": {"$in": request.transaction_ids},
+        "user_id": user["id"]
+    })
+    return {"message": f"Obrisano {result.deleted_count} transakcija", "deleted_count": result.deleted_count}
+
+@api_router.delete("/batches/{batch_id}")
+async def delete_batch(batch_id: str, user: dict = Depends(get_current_user)):
+    """Delete a batch and all its transactions"""
+    # Delete all transactions in batch
+    trans_result = await db.transactions.delete_many({"batch_id": batch_id, "user_id": user["id"]})
+    
+    # Delete batch record
+    batch_result = await db.batches.delete_one({"id": batch_id, "user_id": user["id"]})
+    
+    if batch_result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Batch nije pronađen")
+    
+    return {"message": f"Batch obrisan ({trans_result.deleted_count} transakcija)"}
+
 # ============== STATS ==============
 
 @api_router.get("/stats")
