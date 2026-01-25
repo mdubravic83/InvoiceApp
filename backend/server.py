@@ -1,15 +1,23 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
+from typing import List, Optional
 import uuid
-from datetime import datetime, timezone
-
+from datetime import datetime, timezone, timedelta
+import jwt
+from passlib.context import CryptContext
+import csv
+import io
+import zipfile
+import httpx
+import re
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -19,54 +27,542 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Create the main app without a prefix
-app = FastAPI()
+# JWT Configuration
+JWT_SECRET = os.environ.get('JWT_SECRET', 'finzen-secret-key-change-in-production')
+JWT_ALGORITHM = 'HS256'
+JWT_EXPIRATION_HOURS = 24
 
-# Create a router with the /api prefix
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Security
+security = HTTPBearer()
+
+app = FastAPI(title="FinZen API", version="1.0.0")
 api_router = APIRouter(prefix="/api")
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
+# ============== MODELS ==============
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str
+    name: str
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    name: str
+    zoho_configured: bool = False
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+class ZohoConfig(BaseModel):
+    zoho_email: str
+    zoho_app_password: str
+
+class VendorCreate(BaseModel):
+    name: str
+    keywords: List[str] = []
+    download_url: Optional[str] = None
+    instructions: Optional[str] = None
+
+class VendorResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    user_id: str
+    name: str
+    keywords: List[str] = []
+    download_url: Optional[str] = None
+    instructions: Optional[str] = None
+    created_at: datetime
+
+class TransactionResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    user_id: str
+    batch_id: str
+    datum_izvrsenja: str
+    primatelj: str
+    opis_transakcije: str
+    iznos: str
+    status: str  # pending, found, downloaded, manual
+    invoice_filename: Optional[str] = None
+    invoice_url: Optional[str] = None
+    vendor_id: Optional[str] = None
+    created_at: datetime
+
+class TransactionUpdate(BaseModel):
+    status: Optional[str] = None
+    invoice_filename: Optional[str] = None
+    invoice_url: Optional[str] = None
+
+class BatchResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    user_id: str
+    filename: str
+    month: str
+    year: str
+    transaction_count: int
+    downloaded_count: int
+    created_at: datetime
+
+# ============== HELPERS ==============
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def create_access_token(data: dict) -> str:
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    try:
+        payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Nevažeći token")
+        user = await db.users.find_one({"id": user_id}, {"_id": 0})
+        if not user:
+            raise HTTPException(status_code=401, detail="Korisnik nije pronađen")
+        return user
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token je istekao")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Nevažeći token")
+
+def normalize_vendor_name(name: str) -> str:
+    """Normalize vendor name for matching"""
+    return re.sub(r'[^a-z0-9]', '', name.lower())
+
+def match_vendor(transaction_recipient: str, transaction_desc: str, vendors: list) -> Optional[dict]:
+    """Try to match a transaction to a vendor"""
+    search_text = f"{transaction_recipient} {transaction_desc}".lower()
     
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    for vendor in vendors:
+        # Check vendor name
+        if normalize_vendor_name(vendor['name']) in normalize_vendor_name(search_text):
+            return vendor
+        # Check keywords
+        for keyword in vendor.get('keywords', []):
+            if keyword.lower() in search_text:
+                return vendor
+    return None
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
+# ============== AUTH ROUTES ==============
 
-# Add your routes to the router instead of directly to app
+@api_router.post("/auth/register", response_model=TokenResponse)
+async def register(data: UserCreate):
+    existing = await db.users.find_one({"email": data.email})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email već postoji")
+    
+    user_id = str(uuid.uuid4())
+    user_doc = {
+        "id": user_id,
+        "email": data.email,
+        "password_hash": hash_password(data.password),
+        "name": data.name,
+        "zoho_email": None,
+        "zoho_app_password": None,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.users.insert_one(user_doc)
+    
+    token = create_access_token({"sub": user_id, "email": data.email})
+    return TokenResponse(
+        access_token=token,
+        user=UserResponse(
+            id=user_id,
+            email=data.email,
+            name=data.name,
+            zoho_configured=False
+        )
+    )
+
+@api_router.post("/auth/login", response_model=TokenResponse)
+async def login(data: UserLogin):
+    user = await db.users.find_one({"email": data.email}, {"_id": 0})
+    if not user or not verify_password(data.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Pogrešan email ili lozinka")
+    
+    token = create_access_token({"sub": user["id"], "email": user["email"]})
+    return TokenResponse(
+        access_token=token,
+        user=UserResponse(
+            id=user["id"],
+            email=user["email"],
+            name=user["name"],
+            zoho_configured=bool(user.get("zoho_email"))
+        )
+    )
+
+@api_router.get("/auth/me", response_model=UserResponse)
+async def get_me(user: dict = Depends(get_current_user)):
+    return UserResponse(
+        id=user["id"],
+        email=user["email"],
+        name=user["name"],
+        zoho_configured=bool(user.get("zoho_email"))
+    )
+
+# ============== ZOHO CONFIG ROUTES ==============
+
+@api_router.post("/settings/zoho")
+async def save_zoho_config(config: ZohoConfig, user: dict = Depends(get_current_user)):
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {
+            "zoho_email": config.zoho_email,
+            "zoho_app_password": config.zoho_app_password
+        }}
+    )
+    return {"message": "Zoho konfiguracija spremljena"}
+
+@api_router.get("/settings/zoho")
+async def get_zoho_config(user: dict = Depends(get_current_user)):
+    return {
+        "zoho_email": user.get("zoho_email", ""),
+        "zoho_configured": bool(user.get("zoho_email"))
+    }
+
+# ============== VENDOR ROUTES ==============
+
+@api_router.post("/vendors", response_model=VendorResponse)
+async def create_vendor(data: VendorCreate, user: dict = Depends(get_current_user)):
+    vendor_id = str(uuid.uuid4())
+    vendor_doc = {
+        "id": vendor_id,
+        "user_id": user["id"],
+        "name": data.name,
+        "keywords": data.keywords,
+        "download_url": data.download_url,
+        "instructions": data.instructions,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.vendors.insert_one(vendor_doc)
+    vendor_doc["created_at"] = datetime.fromisoformat(vendor_doc["created_at"])
+    return VendorResponse(**vendor_doc)
+
+@api_router.get("/vendors", response_model=List[VendorResponse])
+async def get_vendors(user: dict = Depends(get_current_user)):
+    vendors = await db.vendors.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
+    for v in vendors:
+        if isinstance(v['created_at'], str):
+            v['created_at'] = datetime.fromisoformat(v['created_at'])
+    return vendors
+
+@api_router.put("/vendors/{vendor_id}", response_model=VendorResponse)
+async def update_vendor(vendor_id: str, data: VendorCreate, user: dict = Depends(get_current_user)):
+    result = await db.vendors.update_one(
+        {"id": vendor_id, "user_id": user["id"]},
+        {"$set": {
+            "name": data.name,
+            "keywords": data.keywords,
+            "download_url": data.download_url,
+            "instructions": data.instructions
+        }}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Dobavljač nije pronađen")
+    
+    vendor = await db.vendors.find_one({"id": vendor_id}, {"_id": 0})
+    if isinstance(vendor['created_at'], str):
+        vendor['created_at'] = datetime.fromisoformat(vendor['created_at'])
+    return VendorResponse(**vendor)
+
+@api_router.delete("/vendors/{vendor_id}")
+async def delete_vendor(vendor_id: str, user: dict = Depends(get_current_user)):
+    result = await db.vendors.delete_one({"id": vendor_id, "user_id": user["id"]})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Dobavljač nije pronađen")
+    return {"message": "Dobavljač obrisan"}
+
+# ============== CSV UPLOAD & TRANSACTIONS ==============
+
+@api_router.post("/upload/csv")
+async def upload_csv(
+    file: UploadFile = File(...),
+    month: str = "12",
+    year: str = "2025",
+    user: dict = Depends(get_current_user)
+):
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="Samo CSV datoteke su dozvoljene")
+    
+    content = await file.read()
+    
+    # Try different encodings
+    for encoding in ['utf-8', 'cp1250', 'iso-8859-2', 'latin-1']:
+        try:
+            text_content = content.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        raise HTTPException(status_code=400, detail="Nije moguće pročitati CSV datoteku")
+    
+    # Parse CSV
+    reader = csv.DictReader(io.StringIO(text_content))
+    
+    batch_id = str(uuid.uuid4())
+    transactions = []
+    
+    # Get user's vendors for matching
+    vendors = await db.vendors.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
+    
+    for row in reader:
+        # Map CSV columns
+        datum = row.get('Datum izvršenja', row.get('Datum', ''))
+        primatelj = row.get('Primatelj', row.get('Naziv', ''))
+        opis = row.get('Opis transakcije', row.get('Opis', ''))
+        iznos = row.get('Ukupan iznos', row.get('Iznos', ''))
+        
+        # Skip empty rows
+        if not primatelj and not opis:
+            continue
+        
+        # Try to match vendor
+        matched_vendor = match_vendor(primatelj, opis, vendors)
+        
+        trans_id = str(uuid.uuid4())
+        transaction_doc = {
+            "id": trans_id,
+            "user_id": user["id"],
+            "batch_id": batch_id,
+            "datum_izvrsenja": datum,
+            "primatelj": primatelj,
+            "opis_transakcije": opis,
+            "iznos": iznos,
+            "status": "pending",
+            "invoice_filename": None,
+            "invoice_url": None,
+            "vendor_id": matched_vendor["id"] if matched_vendor else None,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        transactions.append(transaction_doc)
+    
+    if transactions:
+        await db.transactions.insert_many(transactions)
+    
+    # Create batch record
+    batch_doc = {
+        "id": batch_id,
+        "user_id": user["id"],
+        "filename": file.filename,
+        "month": month,
+        "year": year,
+        "transaction_count": len(transactions),
+        "downloaded_count": 0,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.batches.insert_one(batch_doc)
+    
+    return {
+        "batch_id": batch_id,
+        "transaction_count": len(transactions),
+        "message": f"Učitano {len(transactions)} transakcija"
+    }
+
+@api_router.get("/batches", response_model=List[BatchResponse])
+async def get_batches(user: dict = Depends(get_current_user)):
+    batches = await db.batches.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    for b in batches:
+        if isinstance(b['created_at'], str):
+            b['created_at'] = datetime.fromisoformat(b['created_at'])
+        # Update downloaded count
+        downloaded = await db.transactions.count_documents({
+            "batch_id": b["id"],
+            "status": {"$in": ["downloaded", "found"]}
+        })
+        b['downloaded_count'] = downloaded
+    return batches
+
+@api_router.get("/transactions", response_model=List[TransactionResponse])
+async def get_transactions(
+    batch_id: Optional[str] = None,
+    status: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    query = {"user_id": user["id"]}
+    if batch_id:
+        query["batch_id"] = batch_id
+    if status:
+        query["status"] = status
+    
+    transactions = await db.transactions.find(query, {"_id": 0}).sort("datum_izvrsenja", -1).to_list(1000)
+    for t in transactions:
+        if isinstance(t['created_at'], str):
+            t['created_at'] = datetime.fromisoformat(t['created_at'])
+    return transactions
+
+@api_router.put("/transactions/{transaction_id}", response_model=TransactionResponse)
+async def update_transaction(
+    transaction_id: str,
+    data: TransactionUpdate,
+    user: dict = Depends(get_current_user)
+):
+    update_data = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="Nema podataka za ažuriranje")
+    
+    result = await db.transactions.update_one(
+        {"id": transaction_id, "user_id": user["id"]},
+        {"$set": update_data}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Transakcija nije pronađena")
+    
+    transaction = await db.transactions.find_one({"id": transaction_id}, {"_id": 0})
+    if isinstance(transaction['created_at'], str):
+        transaction['created_at'] = datetime.fromisoformat(transaction['created_at'])
+    return TransactionResponse(**transaction)
+
+# ============== STATS ==============
+
+@api_router.get("/stats")
+async def get_stats(user: dict = Depends(get_current_user)):
+    total_transactions = await db.transactions.count_documents({"user_id": user["id"]})
+    pending = await db.transactions.count_documents({"user_id": user["id"], "status": "pending"})
+    downloaded = await db.transactions.count_documents({"user_id": user["id"], "status": {"$in": ["downloaded", "found"]}})
+    manual = await db.transactions.count_documents({"user_id": user["id"], "status": "manual"})
+    
+    # Get total amount
+    pipeline = [
+        {"$match": {"user_id": user["id"]}},
+        {"$project": {
+            "amount": {
+                "$toDouble": {
+                    "$replaceAll": {
+                        "input": {"$replaceAll": {"input": "$iznos", "find": " EUR", "replacement": ""}},
+                        "find": ",",
+                        "replacement": "."
+                    }
+                }
+            }
+        }},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]
+    
+    try:
+        result = await db.transactions.aggregate(pipeline).to_list(1)
+        total_amount = abs(result[0]["total"]) if result else 0
+    except:
+        total_amount = 0
+    
+    return {
+        "total_transactions": total_transactions,
+        "pending": pending,
+        "downloaded": downloaded,
+        "manual": manual,
+        "total_amount": round(total_amount, 2),
+        "vendors_count": await db.vendors.count_documents({"user_id": user["id"]})
+    }
+
+# ============== EXPORT ==============
+
+@api_router.get("/export/csv/{batch_id}")
+async def export_csv(batch_id: str, user: dict = Depends(get_current_user)):
+    transactions = await db.transactions.find(
+        {"batch_id": batch_id, "user_id": user["id"]},
+        {"_id": 0}
+    ).to_list(10000)
+    
+    if not transactions:
+        raise HTTPException(status_code=404, detail="Nema transakcija za export")
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Header
+    writer.writerow([
+        "Datum izvršenja",
+        "Primatelj",
+        "Opis transakcije",
+        "Iznos",
+        "Status",
+        "Račun preuzet",
+        "Link računa"
+    ])
+    
+    for t in transactions:
+        status_map = {
+            "pending": "Čeka",
+            "found": "Pronađen",
+            "downloaded": "Preuzet",
+            "manual": "Ručno"
+        }
+        writer.writerow([
+            t.get("datum_izvrsenja", ""),
+            t.get("primatelj", ""),
+            t.get("opis_transakcije", ""),
+            t.get("iznos", ""),
+            status_map.get(t.get("status", ""), ""),
+            "Da" if t.get("invoice_filename") else "Ne",
+            t.get("invoice_url", "")
+        ])
+    
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=racuni_{batch_id[:8]}.csv"}
+    )
+
+# ============== ZOHO MAIL SEARCH (MOCK) ==============
+# Note: Real Zoho Mail integration requires OAuth setup
+
+@api_router.post("/email/search")
+async def search_email(
+    vendor_name: str,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Search for invoices in email.
+    Note: This is a placeholder - full Zoho Mail integration requires OAuth configuration.
+    """
+    if not user.get("zoho_email"):
+        raise HTTPException(
+            status_code=400,
+            detail="Zoho email nije konfiguriran. Molimo konfigurirajte u postavkama."
+        )
+    
+    # For now, return mock data indicating the feature requires setup
+    return {
+        "message": "Za potpunu Zoho Mail integraciju potrebna je OAuth konfiguracija.",
+        "instructions": "Molimo konfigurirati Zoho API pristup za automatsko pretraživanje emailova.",
+        "results": []
+    }
+
+# ============== ROOT ==============
+
 @api_router.get("/")
 async def root():
-    return {"message": "Hello World"}
+    return {"message": "FinZen API", "version": "1.0.0"}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
+@api_router.get("/health")
+async def health():
+    return {"status": "healthy"}
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
-
-# Include the router in the main app
+# Include router
 app.include_router(api_router)
 
 app.add_middleware(
@@ -76,13 +572,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
