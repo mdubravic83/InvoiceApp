@@ -249,6 +249,17 @@ class FinZenAPITester:
         self.log_test("CSV Export", success, result if not success else "")
         return success
 
+    def test_zip_export(self, batch_id):
+        """Test ZIP export functionality"""
+        if not batch_id:
+            self.log_test("ZIP Export", False, "No batch_id available")
+            return False
+        
+        # This should fail because no invoices are downloaded yet
+        success, result = self.make_request('GET', f'export/zip/{batch_id}', expected_status=404)
+        self.log_test("ZIP Export (No Downloaded Invoices)", success, result if not success else "")
+        return success
+
     def test_email_endpoints(self):
         """Test new Zoho IMAP email endpoints"""
         # Test connection endpoint (should fail without valid credentials)
