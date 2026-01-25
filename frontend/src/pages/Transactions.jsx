@@ -327,34 +327,34 @@ export default function Transactions() {
 
         setEmailSearching(true);
         try {
-            // Calculate date range from transaction date
+            // Calculate date from transaction date (exact day)
             let dateFrom = null;
             let dateTo = null;
             const dateStr = selectedTransaction.datum_izvrsenja;
             
             if (dateStr) {
                 try {
-                    // Parse date and create range
+                    // Parse date
                     const formats = [
                         { regex: /(\d{4})-(\d{2})-(\d{2})/, order: [1, 2, 3] },
                         { regex: /(\d{2})\.(\d{2})\.(\d{4})/, order: [3, 2, 1] },
                         { regex: /(\d{2})\/(\d{2})\/(\d{4})/, order: [3, 2, 1] },
+                        { regex: /(\d{1,2})\/(\d{1,2})\/(\d{4})/, order: [3, 1, 2] }, // M/D/YYYY format
                     ];
                     
                     for (const fmt of formats) {
                         const match = dateStr.match(fmt.regex);
                         if (match) {
                             const year = match[fmt.order[0]];
-                            const month = match[fmt.order[1]];
-                            const day = match[fmt.order[2]];
+                            const month = match[fmt.order[1]].padStart(2, '0');
+                            const day = match[fmt.order[2]].padStart(2, '0');
                             const transDate = new Date(year, month - 1, day);
                             
-                            const fromDate = new Date(transDate);
-                            fromDate.setDate(fromDate.getDate() - 5);
+                            // Same day search
                             const toDate = new Date(transDate);
-                            toDate.setDate(toDate.getDate() + 5);
+                            toDate.setDate(toDate.getDate() + 1);
                             
-                            dateFrom = fromDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
+                            dateFrom = transDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
                             dateTo = toDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
                             break;
                         }
@@ -371,7 +371,7 @@ export default function Transactions() {
             );
             setEmailResults(response.data.results || []);
             if (response.data.results?.length === 0) {
-                toast.info('Nisu pronađeni emailovi za ovog dobavljača');
+                toast.info('Nisu pronađeni emailovi za ovog dobavljača na taj datum');
             }
         } catch (err) {
             const message = err.response?.data?.detail || 'Greška pri pretraživanju';
