@@ -435,15 +435,38 @@ async def upload_csv(
 @api_router.get("/batches", response_model=List[BatchResponse])
 async def get_batches(user: dict = Depends(get_current_user)):
     batches = await db.batches.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    
+    if not batches:
+        return []
+    
+    # Get all batch IDs
+    batch_ids = [b["id"] for b in batches]
+    
+    # Single aggregation query to get downloaded counts for all batches
+    pipeline = [
+        {"$match": {
+            "user_id": user["id"],
+            "batch_id": {"$in": batch_ids},
+            "status": {"$in": ["downloaded", "found"]}
+        }},
+        {"$group": {
+            "_id": "$batch_id",
+            "count": {"$sum": 1}
+        }}
+    ]
+    
+    counts_cursor = db.transactions.aggregate(pipeline)
+    counts_list = await counts_cursor.to_list(1000)
+    
+    # Create a lookup dict for counts
+    counts_dict = {item["_id"]: item["count"] for item in counts_list}
+    
+    # Update batches with counts
     for b in batches:
         if isinstance(b['created_at'], str):
             b['created_at'] = datetime.fromisoformat(b['created_at'])
-        # Update downloaded count
-        downloaded = await db.transactions.count_documents({
-            "batch_id": b["id"],
-            "status": {"$in": ["downloaded", "found"]}
-        })
-        b['downloaded_count'] = downloaded
+        b['downloaded_count'] = counts_dict.get(b["id"], 0)
+    
     return batches
 
 @api_router.get("/transactions", response_model=List[TransactionResponse])
