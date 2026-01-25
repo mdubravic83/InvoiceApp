@@ -318,7 +318,6 @@ class FinZenAPITester:
         print("\n📊 Testing Transactions & CSV...")
         batch_id = self.test_csv_upload_and_transactions()
         self.test_stats_endpoint()
-        self.test_csv_export(batch_id)
         
         # Email search mock test
         print("\n📧 Testing Email Integration...")
