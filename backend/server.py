@@ -878,6 +878,137 @@ async def test_email_connection(user: dict = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Greška pri povezivanju: {str(e)}")
 
+class BatchSearchRequest(BaseModel):
+    transaction_ids: List[str]
+
+@api_router.post("/email/batch-search")
+async def batch_search_emails(
+    request: BatchSearchRequest,
+    user: dict = Depends(get_current_user)
+):
+    """Search emails for multiple transactions at once"""
+    if not user.get("zoho_email") or not user.get("zoho_app_password"):
+        raise HTTPException(
+            status_code=400,
+            detail="Zoho email nije konfiguriran. Molimo konfigurirajte u postavkama."
+        )
+    
+    # Get transactions
+    transactions = await db.transactions.find(
+        {"id": {"$in": request.transaction_ids}, "user_id": user["id"]},
+        {"_id": 0}
+    ).to_list(1000)
+    
+    if not transactions:
+        raise HTTPException(status_code=404, detail="Transakcije nisu pronađene")
+    
+    try:
+        mail_client = ZohoMailClient(user["zoho_email"], user["zoho_app_password"])
+        mail_client.connect()
+        
+        results = []
+        for trans in transactions:
+            # Parse date for search range (search around transaction date)
+            date_str = trans.get("datum_izvrsenja", "")
+            date_from = None
+            date_to = None
+            
+            if date_str:
+                try:
+                    # Try to parse date and create range
+                    from datetime import datetime, timedelta
+                    # Handle various date formats
+                    for fmt in ["%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y"]:
+                        try:
+                            trans_date = datetime.strptime(date_str.strip(), fmt)
+                            # Search 5 days before and after
+                            date_from = (trans_date - timedelta(days=5)).strftime("%d-%b-%Y")
+                            date_to = (trans_date + timedelta(days=5)).strftime("%d-%b-%Y")
+                            break
+                        except:
+                            continue
+                except:
+                    pass
+            
+            vendor_name = trans.get("primatelj", "")
+            if not vendor_name:
+                results.append({
+                    "transaction_id": trans["id"],
+                    "vendor": vendor_name,
+                    "date": date_str,
+                    "found": False,
+                    "emails": [],
+                    "error": "Nema naziva primatelja"
+                })
+                continue
+            
+            # Search for emails
+            emails = mail_client.search_emails(
+                search_term=vendor_name,
+                date_from=date_from,
+                date_to=date_to
+            )
+            
+            # Get attachments for emails with PDF
+            for email_result in emails:
+                attachments = mail_client.get_email_attachments(email_result["email_id"])
+                email_result["attachments"] = attachments
+                email_result["has_pdf"] = any(a.get("is_pdf") for a in attachments)
+            
+            # Filter to only emails with PDFs
+            emails_with_pdf = [e for e in emails if e.get("has_pdf")]
+            
+            results.append({
+                "transaction_id": trans["id"],
+                "vendor": vendor_name,
+                "date": date_str,
+                "found": len(emails_with_pdf) > 0,
+                "emails": emails_with_pdf[:5],  # Limit to 5 results per transaction
+                "total_found": len(emails_with_pdf)
+            })
+        
+        mail_client.disconnect()
+        
+        found_count = sum(1 for r in results if r["found"])
+        return {
+            "success": True,
+            "total_transactions": len(results),
+            "found_count": found_count,
+            "results": results
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Batch search error: {e}")
+        raise HTTPException(status_code=500, detail=f"Greška pri pretraživanju: {str(e)}")
+
+@api_router.get("/invoices/{transaction_id}/download")
+async def download_invoice(transaction_id: str, user: dict = Depends(get_current_user)):
+    """Download saved invoice file"""
+    transaction = await db.transactions.find_one(
+        {"id": transaction_id, "user_id": user["id"]},
+        {"_id": 0}
+    )
+    
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Transakcija nije pronađena")
+    
+    invoice_path = transaction.get("invoice_path")
+    if not invoice_path or not os.path.exists(invoice_path):
+        raise HTTPException(status_code=404, detail="Račun nije pronađen")
+    
+    filename = transaction.get("invoice_filename", "racun.pdf")
+    
+    def file_iterator():
+        with open(invoice_path, 'rb') as f:
+            yield from f
+    
+    return StreamingResponse(
+        file_iterator(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
 # ============== ZIP DOWNLOAD ==============
 
 @api_router.get("/export/zip/{batch_id}")
