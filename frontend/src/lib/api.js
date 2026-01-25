@@ -43,6 +43,8 @@ export const authApi = {
 export const settingsApi = {
     saveZoho: (data) => api.post('/settings/zoho', data),
     getZoho: () => api.get('/settings/zoho'),
+    saveSearch: (data) => api.post('/settings/search', data),
+    getSearch: () => api.get('/settings/search'),
 };
 
 // Vendors
