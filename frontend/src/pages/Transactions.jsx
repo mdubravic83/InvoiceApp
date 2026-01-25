@@ -1068,6 +1068,84 @@ export default function Transactions() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Delete Selected Dialog */}
+            <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-destructive">
+                            <Trash2 className="h-5 w-5" />
+                            Obriši transakcije
+                        </DialogTitle>
+                        <DialogDescription>
+                            Jeste li sigurni da želite obrisati {selectedIds.size} odabranih transakcija? 
+                            Ova akcija se ne može poništiti.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>
+                            Odustani
+                        </Button>
+                        <Button 
+                            variant="destructive" 
+                            onClick={handleDeleteSelected}
+                            disabled={deleting}
+                            data-testid="confirm-delete-selected-btn"
+                        >
+                            {deleting ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Brisanje...
+                                </>
+                            ) : (
+                                <>
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Obriši ({selectedIds.size})
+                                </>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Delete Batch Dialog */}
+            <Dialog open={deleteBatchDialogOpen} onOpenChange={setDeleteBatchDialogOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-destructive">
+                            <Trash2 className="h-5 w-5" />
+                            Obriši cijeli batch
+                        </DialogTitle>
+                        <DialogDescription>
+                            Jeste li sigurni da želite obrisati cijeli batch i sve njegove transakcije? 
+                            Ova akcija se ne može poništiti.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setDeleteBatchDialogOpen(false)} disabled={deleting}>
+                            Odustani
+                        </Button>
+                        <Button 
+                            variant="destructive" 
+                            onClick={handleDeleteBatch}
+                            disabled={deleting}
+                            data-testid="confirm-delete-batch-btn"
+                        >
+                            {deleting ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Brisanje...
+                                </>
+                            ) : (
+                                <>
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Obriši batch
+                                </>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </Layout>
     );
 }
