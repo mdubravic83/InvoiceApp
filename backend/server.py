@@ -327,12 +327,42 @@ async def upload_csv(
     # Get user's vendors for matching
     vendors = await db.vendors.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
     
+    # Log available columns for debugging
+    logger.info(f"CSV columns: {reader.fieldnames}")
+    
     for row in reader:
-        # Map CSV columns
-        datum = row.get('Datum izvršenja', row.get('Datum', ''))
-        primatelj = row.get('Primatelj', row.get('Naziv', ''))
-        opis = row.get('Opis transakcije', row.get('Opis', ''))
-        iznos = row.get('Ukupan iznos', row.get('Iznos', ''))
+        # Map CSV columns - try multiple possible column names
+        datum = (
+            row.get('Datum izvršenja') or 
+            row.get('Datum izvrsenja') or
+            row.get('Datum knjiženja') or
+            row.get('Datum knjizenja') or
+            row.get('Datum') or 
+            ''
+        ).strip()
+        
+        primatelj = (
+            row.get('Primatelj') or 
+            row.get('Naziv') or
+            row.get('Naziv primatelja') or
+            ''
+        ).strip()
+        
+        opis = (
+            row.get('Opis transakcije') or 
+            row.get('Opis transa') or
+            row.get('Opis') or
+            row.get('Napomena') or
+            ''
+        ).strip()
+        
+        iznos = (
+            row.get('Ukupan iznos') or 
+            row.get('Ukupan izn') or
+            row.get('Iznos') or
+            row.get('Iznos transakcije') or
+            ''
+        ).strip()
         
         # Skip empty rows
         if not primatelj and not opis:
