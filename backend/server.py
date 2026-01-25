@@ -802,23 +802,18 @@ class ZohoMailClient:
                             # Get date
                             date_str = msg.get("Date", "")
                             
-                            # Check if search term matches
-                            search_lower = search_term.lower()
-                            if search_lower in subject.lower() or search_lower in from_addr.lower():
-                                results.append({
-                                    "email_id": email_id.decode(),
-                                    "subject": subject,
-                                    "from": from_addr,
-                                    "date": date_str
-                                })
-                except Exception as e:
-                    logger.error(f"Error parsing email {email_id}: {e}")
-                    continue
-            
-            return results
-        except Exception as e:
-            logger.error(f"Search error: {e}")
-            return []
+                            # Add to results (no additional filtering - IMAP already filtered)
+                            results.append({
+                                "email_id": email_id.decode() if isinstance(email_id, bytes) else str(email_id),
+                                "subject": subject,
+                                "from": from_addr,
+                                "date": date_str
+                            })
+            except Exception as e:
+                logger.error(f"Error parsing email {email_id}: {e}")
+                continue
+        
+        return results
     
     def get_email_attachments(self, email_id: str, folder: str = "INBOX"):
         """Get list of attachments from an email"""
