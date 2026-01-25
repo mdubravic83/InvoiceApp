@@ -22,11 +22,13 @@ export default function Settings() {
     const { user, updateUser } = useAuth();
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [testing, setTesting] = useState(false);
     const [zohoConfig, setZohoConfig] = useState({
         zoho_email: '',
         zoho_app_password: '',
     });
     const [isConfigured, setIsConfigured] = useState(false);
+    const [connectionTested, setConnectionTested] = useState(false);
 
     useEffect(() => {
         loadSettings();
