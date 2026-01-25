@@ -249,18 +249,31 @@ class FinZenAPITester:
         self.log_test("CSV Export", success, result if not success else "")
         return success
 
-    def test_email_search_mock(self):
-        """Test mocked email search endpoint"""
+    def test_email_endpoints(self):
+        """Test new Zoho IMAP email endpoints"""
+        # Test connection endpoint (should fail without valid credentials)
+        success, result = self.make_request('GET', 'email/test-connection', expected_status=400)
+        self.log_test("Email Test Connection (No Config)", success, result if not success else "")
+        
+        # Test email search endpoint (should fail without valid credentials)
         search_data = {
             "vendor_name": "Test Vendor",
             "date_from": "2025-01-01",
             "date_to": "2025-01-31"
         }
+        success, result = self.make_request('POST', 'email/search', search_data, expected_status=400)
+        self.log_test("Email Search (No Config)", success, result if not success else "")
         
-        # This should return a mock response about OAuth configuration
-        success, result = self.make_request('POST', 'email/search?vendor_name=Test Vendor')
-        self.log_test("Email Search (Mock)", success, result if not success else "")
-        return success
+        # Test download attachment endpoint (should fail without valid credentials)
+        download_data = {
+            "email_id": "123",
+            "filename": "test.pdf",
+            "transaction_id": "test-transaction-id"
+        }
+        success, result = self.make_request('POST', 'email/download-attachment', download_data, expected_status=400)
+        self.log_test("Email Download Attachment (No Config)", success, result if not success else "")
+        
+        return True
 
     def run_all_tests(self):
         """Run all tests in sequence"""
