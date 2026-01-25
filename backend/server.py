@@ -913,11 +913,18 @@ async def batch_search_emails(
             detail="Zoho email nije konfiguriran. Molimo konfigurirajte u postavkama."
         )
     
+    # Limit batch size to prevent timeout
+    MAX_BATCH_SIZE = 15
+    transaction_ids = request.transaction_ids[:MAX_BATCH_SIZE]
+    
+    if len(request.transaction_ids) > MAX_BATCH_SIZE:
+        logger.warning(f"Batch search limited from {len(request.transaction_ids)} to {MAX_BATCH_SIZE}")
+    
     # Get transactions
     transactions = await db.transactions.find(
-        {"id": {"$in": request.transaction_ids}, "user_id": user["id"]},
+        {"id": {"$in": transaction_ids}, "user_id": user["id"]},
         {"_id": 0}
-    ).to_list(1000)
+    ).to_list(MAX_BATCH_SIZE)
     
     if not transactions:
         raise HTTPException(status_code=404, detail="Transakcije nisu pronađene")
@@ -927,37 +934,41 @@ async def batch_search_emails(
         mail_client.connect()
         
         results = []
-        for trans in transactions:
-            # Parse date for search range (search around transaction date)
-            date_str = trans.get("datum_izvrsenja", "")
-            date_from = None
-            date_to = None
-            
-            if date_str:
-                try:
-                    # Try to parse date and create range
-                    from datetime import datetime, timedelta
-                    # Handle various date formats
-                    for fmt in ["%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y"]:
-                        try:
-                            trans_date = datetime.strptime(date_str.strip(), fmt)
-                            # Search 5 days before and after
-                            date_from = (trans_date - timedelta(days=5)).strftime("%d-%b-%Y")
-                            date_to = (trans_date + timedelta(days=5)).strftime("%d-%b-%Y")
-                            break
-                        except:
-                            continue
-                except:
-                    pass
-            
-            vendor_name = trans.get("primatelj", "")
-            if not vendor_name:
-                results.append({
-                    "transaction_id": trans["id"],
-                    "vendor": vendor_name,
-                    "date": date_str,
-                    "found": False,
-                    "emails": [],
+        for idx, trans in enumerate(transactions):
+            try:
+                # Parse date for search range (search around transaction date)
+                date_str = trans.get("datum_izvrsenja", "")
+                date_from = None
+                date_to = None
+                
+                if date_str:
+                    try:
+                        # Try to parse date and create range
+                        from datetime import datetime, timedelta
+                        # Handle various date formats
+                        for fmt in ["%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y"]:
+                            try:
+                                trans_date = datetime.strptime(date_str.strip(), fmt)
+                                # Search 5 days before and after
+                                date_from = (trans_date - timedelta(days=5)).strftime("%d-%b-%Y")
+                                date_to = (trans_date + timedelta(days=5)).strftime("%d-%b-%Y")
+                                break
+                            except:
+                                continue
+                    except:
+                        pass
+                
+                vendor_name = trans.get("primatelj", "")
+                if not vendor_name:
+                    results.append({
+                        "transaction_id": trans["id"],
+                        "vendor": vendor_name,
+                        "date": date_str,
+                        "found": False,
+                        "emails": [],
+                        "error": "Nema naziva primatelja"
+                    })
+                    continue
                     "error": "Nema naziva primatelja"
                 })
                 continue
