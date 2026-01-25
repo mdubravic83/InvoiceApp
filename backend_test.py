@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 class FinZenAPITester:
-    def __init__(self, base_url="https://receipt-harvest-1.preview.emergentagent.com"):
+    def __init__(self, base_url="https://invoice-scout-2.preview.emergentagent.com"):
         self.base_url = base_url
         self.token = None
         self.user_id = None

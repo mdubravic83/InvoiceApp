@@ -1,0 +1,167 @@
+<analysis>**original_problem_statement:**
+The user wants to build a full-stack application using React and MongoDB. The application should be deployable on a Plesk server or run locally.
+
+**PRODUCT REQUIREMENTS:**
+1.  **Email Integration:** Access the user's Zoho email account.
+2.  **Invoice Processing:**
+    *   The user will manually upload a CSV file of bank transactions each month.
+    *   The application must parse this CSV to identify vendors and transactions for which invoices need to be found.
+    *   For each transaction, the app should search the user's email for a corresponding invoice (usually a PDF attachment). The email search should be configurable (date range, search terms).
+3.  **Web Scraping Fallback:** If an email invoice cannot be found, the application should attempt to access a vendor's website (e.g., ) to download the invoice.
+4.  **Vendor Management:** The application must allow the user to store instructions (links, notes) on how to download invoices for specific vendors, especially for new or problematic ones.
+5.  **Status & Output:**
+    *   The application should display the status of each transaction (e.g., Pending, Found, Not Found).
+    *   It should show a confidence score (percentage) for found invoices.
+    *   If an invoice is found and downloaded, provide a direct download link for that file.
+    *   Provide an option to download all fetched invoices as a single ZIP file.
+    *   The original CSV should be updated to mark which invoices were successfully downloaded and include a link to the file.
+6.  **Batch Operations:**
+    *   Implement a batch search feature to process multiple transactions at once. This should be chunked to avoid timeouts.
+    *   Implement options to delete selected transactions or an entire uploaded batch.
+
+**User's preferred language**: hr-HR (Croatian). The next agent MUST respond in Croatian.
+
+**what currently exists?**
+A full-stack application (FastAPI backend, React frontend) has been developed. Key features include user authentication (JWT), CSV upload and parsing, a transaction management dashboard, and integration with Zoho Mail via IMAP for searching and downloading invoice attachments. The application UI allows for managing vendors, configuring Zoho credentials, setting search parameters (date range, keywords), and performing batch searches. It also includes features for calculating a match confidence score, displaying transaction statuses, and downloading individual invoices. A delete functionality for transactions has also been implemented.
+
+**Last working item**:
+*   **Last item agent was working:** The user requested a Docker configuration ( and s) to simplify deployment on their Contabo server with Plesk. The agent acknowledged the request and was about to start creating these files.
+*   **Status:** NOT STARTED
+*   **Agent Testing Done:** N/A
+*   **Which testing method agent to use?** After creating the Docker files, the agent should instruct the user on how to build and run the containers and verify that the application starts correctly. No automated testing agent is needed for this task.
+*   **User Testing Done:** N/A
+
+**All Pending/In progress Issue list**:
+*   **Issue 1: (P1) CSV Date Parsing Unconfirmed Fix**
+    *   **Description:** The user reported that after uploading a new CSV, the date column was not being displayed. The agent implemented a fix to make CSV header parsing more flexible, but it was never confirmed by the user if this resolved the issue.
+    *   **Attempted fixes:** The  function in  was modified to recognize multiple possible names for the date, recipient, and amount columns.
+    *   **Next debug checklist:**
+        1.  Ask the user to re-upload their specific CSV file.
+        2.  If the issue persists, inspect the backend logs () immediately after the upload to see the exact headers being read from the CSV and to trace why the 'Datum izvršenja' (or equivalent) is not being parsed into the  field.
+        3.  Check the  function in .
+    *   **Why fix this issue and what will be achieved with the fix?** The transaction date is critical for the core functionality of searching emails within a specific timeframe. Without it, the email search will fail or be inaccurate.
+    *   **Status:** USER VERIFICATION PENDING
+    *   **Is recurring issue?** N
+    *   **Should Test frontend/backend/both after fix?** Backend.
+    *   **Blocked on other issue:** None.
+
+**In progress Task List**:
+*   None.
+
+**Upcoming and Future Tasks**
+*   **Upcoming Tasks:**
+    *   **Task 1: (P0) Create Docker Configuration**
+        *   **Where to resume:** Create a  in the  directory for the FastAPI application.
+        *   Create a  in the  directory for the React application.
+        *   Create a  file in the  root directory to orchestrate the backend, frontend, and a MongoDB service.
+        *   Provide the user with clear instructions on how to use  to build and run the application on their server.
+    *   **Task 2: (P2) Web Scraping Fallback**
+        *   **Description:** Implement the requested feature to scrape a vendor's website for an invoice if it's not found in the emails. This was part of the original request but has not been implemented.
+        *   **File/Method:** This would require a new backend endpoint and a library like  or .
+
+**Completed work in this session**
+- **Recently completed:**
+  - Implemented JWT-based user authentication.
+  - Developed a dashboard for uploading and viewing CSV transactions.
+  - Integrated Zoho Mail via IMAP for searching and downloading PDF attachments.
+  - Added configurable search settings (date range, search all fields).
+  - Implemented batch email search with chunking to prevent timeouts.
+  - Added logic to calculate a match confidence score for found invoices.
+  - Implemented status updates (e.g., Found, Not Found) for transactions.
+  - Added functionality to download individual found invoices and all invoices as a ZIP file.
+  - Implemented functionality to delete selected transactions or entire batches.
+  - Addressed multiple bugs, including an authentication issue causing logout, IMAP connection errors, and character encoding problems in search.
+  - Passed a deployment health check after fixing an N+1 query issue and a security vulnerability.
+
+**Earlier issues found/mentioned but not fixed**
+*   None. The agent has been diligent in addressing issues as they arose.
+
+**Known issue recurrence from previous fork**
+*   None.
+
+**Code Architecture**
+
+
+**Key Technical Concepts**
+*   **Backend:** FastAPI
+*   **Frontend:** React
+*   **Database:** MongoDB
+*   **Authentication:** JWT (JSON Web Tokens)
+*   **Email Integration:** Python's built-in  for IMAP communication with Zoho Mail servers.
+*   **File Handling:** CSV parsing, PDF attachment downloading, ZIP file creation.
+*   **API:** RESTful API design.
+
+**key DB schema**
+*   **users:** 
+*   **transactions:** 
+*   **batches:** 
+
+**changes in tech stack**
+*   None. The stack has remained FastAPI, React, and MongoDB as initially planned.
+
+**All files of reference**
+*   : The single-file backend containing all API logic, database models, and the Zoho IMAP integration. It has been modified extensively.
+*   : The core frontend page for displaying transactions and interacting with them. It has been overwritten and edited multiple times to add new features.
+*   : The page for configuring user settings, including Zoho credentials and search parameters.
+*   : Defines all frontend-to-backend API calls.
+
+**Areas that need refactoring**:
+*   The  file is over 1200 lines long and contains all models, routes, and business logic. It should be broken down into a more modular structure (e.g., routers for different concerns, a separate file for the Zoho client, Pydantic models in a  file).
+
+**key api endpoints**
+*   : User registration.
+*   : User login, returns JWT.
+*   : Get current user details.
+*   : Upload and process a CSV file.
+*   : Get all transactions for the current user.
+*   : Perform email search for a list of transaction IDs.
+*   : Delete specified transactions.
+*   : Delete an entire batch and its transactions.
+*   : Update user settings (Zoho config, search params).
+*   : Test the IMAP connection with saved credentials.
+*   : Download a found invoice file.
+*   : Download a ZIP of all found invoices in a batch.
+
+**Critical Info for New Agent**
+*   The user wants a Docker-based deployment solution. Your immediate priority is to create the s and .
+*   The backend logic for IMAP search in  is complex. It tries multiple Zoho servers (, , ) and uses an OR-based search strategy for better results.
+*   The batch search is intentionally limited to 15 transactions at a time on the backend to prevent timeouts. The frontend reflects this limitation.
+*   The application saves downloaded PDF invoices to a directory named  in the application's root. This will need to be handled with a Docker volume.
+
+**documents and test reports created in this job**
+*   
+*   
+*   
+
+**Last 10 User Messages and any pending HUMAN messages**
+1.  **User:** Requests an option to delete uploaded transactions. (Completed)
+2.  **User:** Reports that after deleting and re-uploading, the transaction date is not showing. Provides an image of their CSV. (Fix Attempted, Verification Pending)
+3.  **User:** Asks to change the email search from a +/- 5 day range to the exact date of the transaction. (Completed)
+4.  **User:** Requests settings to configure the +/- day range for email search and to include all transaction fields (description, notes) in the search. (Completed)
+5.  **User:** Reports that the email search is too restrictive (AND logic) and not finding expected emails. Asks to use OR logic instead. (Completed)
+6.  **User:** Requests several new features: consider email timestamp for matching, add a confidence score column, and automatically update transaction status to found or not found (in red) after a search. (Completed)
+7.  **User:** Initiated a deployment health check. (Completed)
+8.  **User:** Asks what is needed to deploy the application on their Contabo server with Plesk. (Completed, led to Docker request)
+9.  **User:** Confirms they want the agent to create a Docker configuration. (In Progress - This is the current task)
+10. **(PENDING HUMAN MESSAGE)** No pending messages. The agent is expected to act on the last request.
+
+**Project Health Check:**
+*   **Broken:** None. The application is functional.
+*   **Mocked:** The web scraping fallback feature is not implemented; it remains a placeholder concept from the original requirements.
+
+**3rd Party Integrations**
+*   **Zoho Mail:** Integrated via Python's  for direct IMAP access. Requires user-provided credentials (email and App Password).
+
+**Testing status**
+*   **Testing agent used after significant changes:** YES
+*   **Troubleshoot agent used after agent stuck in loop:** NO
+*   **Test files created:** None.
+*   **Known regressions:** None.
+
+**Credentials to test flow:**
+*   **Email:** 
+*   **Password:** 
+*   **Zoho Credentials:** The user must provide their own Zoho email and an App-specific password in the application's Settings page to test the core email-searching functionality.
+
+**What agent forgot to execute**
+*   **Web Scraping Fallback:** The original problem statement included a requirement for a web scraping fallback if an invoice isn't found in emails. This feature has not been planned or implemented.</analysis>
