@@ -555,7 +555,7 @@ class ZohoMailClient:
             return True
         except imaplib.IMAP4.error as e:
             logger.error(f"IMAP login failed: {e}")
-            raise HTTPException(status_code=401, detail=f"Greška pri prijavi na Zoho Mail: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Greška pri prijavi na Zoho Mail: Provjerite email i App Password")
     
     def disconnect(self):
         """Disconnect from IMAP server"""
