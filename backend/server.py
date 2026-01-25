@@ -539,23 +539,59 @@ INVOICES_DIR.mkdir(exist_ok=True)
 class ZohoMailClient:
     """Zoho Mail IMAP Client for fetching emails and attachments"""
     
-    IMAP_SERVER = "imap.zoho.eu"  # Use .com for US, .eu for Europe
+    IMAP_SERVERS = {
+        "eu": "imap.zoho.eu",
+        "com": "imap.zoho.com", 
+        "in": "imap.zoho.in",
+        "au": "imap.zoho.com.au"
+    }
     IMAP_PORT = 993
     
-    def __init__(self, email_address: str, app_password: str):
+    def __init__(self, email_address: str, app_password: str, region: str = None):
         self.email_address = email_address
         self.app_password = app_password
         self.connection = None
+        # Auto-detect region from email domain or use provided
+        if region:
+            self.region = region
+        elif email_address.endswith('.eu'):
+            self.region = 'eu'
+        elif email_address.endswith('.in'):
+            self.region = 'in'
+        elif email_address.endswith('.com.au'):
+            self.region = 'au'
+        else:
+            self.region = 'eu'  # Default to EU
     
     def connect(self):
-        """Connect to Zoho IMAP server"""
-        try:
-            self.connection = imaplib.IMAP4_SSL(self.IMAP_SERVER, self.IMAP_PORT)
-            self.connection.login(self.email_address, self.app_password)
-            return True
-        except imaplib.IMAP4.error as e:
-            logger.error(f"IMAP login failed: {e}")
-            raise HTTPException(status_code=400, detail=f"Greška pri prijavi na Zoho Mail: Provjerite email i App Password")
+        """Connect to Zoho IMAP server, try multiple regions if needed"""
+        regions_to_try = [self.region] + [r for r in self.IMAP_SERVERS.keys() if r != self.region]
+        
+        last_error = None
+        for region in regions_to_try:
+            try:
+                server = self.IMAP_SERVERS[region]
+                logger.info(f"Trying IMAP server: {server}")
+                self.connection = imaplib.IMAP4_SSL(server, self.IMAP_PORT)
+                self.connection.login(self.email_address, self.app_password)
+                logger.info(f"Successfully connected to {server}")
+                return True
+            except imaplib.IMAP4.error as e:
+                logger.error(f"IMAP login failed on {server}: {e}")
+                last_error = e
+                if self.connection:
+                    try:
+                        self.connection.logout()
+                    except:
+                        pass
+                self.connection = None
+                continue
+        
+        # All servers failed
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Greška pri prijavi na Zoho Mail. Provjerite: 1) Je li IMAP omogućen u Zoho postavkama, 2) Je li App Password ispravan, 3) Email adresu"
+        )
     
     def disconnect(self):
         """Disconnect from IMAP server"""
