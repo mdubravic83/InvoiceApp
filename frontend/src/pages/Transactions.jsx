@@ -869,7 +869,7 @@ export default function Transactions() {
                             ) : (
                                 <>
                                     <Search className="h-4 w-4 mr-2" />
-                                    Pretraži emailove (±5 dana od datuma)
+                                    Pretraži emailove (datum: {selectedTransaction?.datum_izvrsenja})
                                 </>
                             )}
                         </Button>
