@@ -1073,28 +1073,37 @@ async def batch_search_emails(
                     })
                     continue
                 
-                # Search for emails
-                emails = mail_client.search_emails(
-                    search_term=vendor_name,
-                    date_from=date_from,
-                    date_to=date_to
-                )
+                # Search for emails using all search terms
+                all_emails = []
+                seen_email_ids = set()
                 
-                # Get attachments for emails with PDF (limit to first 3 for performance)
-                for email_result in emails[:3]:
+                for term in search_terms[:5]:  # Max 5 search terms
+                    emails = mail_client.search_emails(
+                        search_term=term,
+                        date_from=date_from,
+                        date_to=date_to
+                    )
+                    for e in emails:
+                        if e["email_id"] not in seen_email_ids:
+                            seen_email_ids.add(e["email_id"])
+                            all_emails.append(e)
+                
+                # Get attachments for emails with PDF (limit to first 5 for performance)
+                for email_result in all_emails[:5]:
                     attachments = mail_client.get_email_attachments(email_result["email_id"])
                     email_result["attachments"] = attachments
                     email_result["has_pdf"] = any(a.get("is_pdf") for a in attachments)
                 
                 # Filter to only emails with PDFs
-                emails_with_pdf = [e for e in emails[:3] if e.get("has_pdf")]
+                emails_with_pdf = [e for e in all_emails[:5] if e.get("has_pdf")]
                 
                 results.append({
                     "transaction_id": trans["id"],
                     "vendor": vendor_name,
                     "date": date_str,
+                    "search_terms": search_terms[:5],
                     "found": len(emails_with_pdf) > 0,
-                    "emails": emails_with_pdf[:2],  # Limit to 2 results per transaction
+                    "emails": emails_with_pdf[:3],  # Limit to 3 results per transaction
                     "total_found": len(emails_with_pdf)
                 })
                 
