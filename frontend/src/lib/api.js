@@ -81,7 +81,16 @@ export const statsApi = {
 // Email
 export const emailApi = {
     search: (vendorName, dateFrom, dateTo) => 
-        api.post(`/email/search?vendor_name=${encodeURIComponent(vendorName)}${dateFrom ? `&date_from=${dateFrom}` : ''}${dateTo ? `&date_to=${dateTo}` : ''}`),
+        api.post('/email/search', { vendor_name: vendorName, date_from: dateFrom, date_to: dateTo }),
+    downloadAttachment: (emailId, filename, transactionId) =>
+        api.post('/email/download-attachment', { email_id: emailId, filename, transaction_id: transactionId }),
+    testConnection: () => api.get('/email/test-connection'),
+};
+
+// Export
+export const exportApi = {
+    csv: (batchId) => api.get(`/export/csv/${batchId}`, { responseType: 'blob' }),
+    zip: (batchId) => api.get(`/export/zip/${batchId}`, { responseType: 'blob' }),
 };
 
 export default api;
