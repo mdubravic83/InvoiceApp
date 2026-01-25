@@ -279,6 +279,42 @@ export default function Transactions() {
         }
     };
 
+    // Delete functions
+    const handleDeleteSelected = async () => {
+        if (selectedIds.size === 0) return;
+        
+        setDeleting(true);
+        try {
+            const response = await transactionApi.deleteBatchTransactions(Array.from(selectedIds));
+            toast.success(response.data.message);
+            setDeleteDialogOpen(false);
+            setSelectedIds(new Set());
+            setSelectAll(false);
+            await loadData();
+        } catch (err) {
+            toast.error('Greška pri brisanju');
+        } finally {
+            setDeleting(false);
+        }
+    };
+
+    const handleDeleteBatch = async () => {
+        if (batchFilter === 'all') return;
+        
+        setDeleting(true);
+        try {
+            const response = await transactionApi.deleteBatch(batchFilter);
+            toast.success(response.data.message);
+            setDeleteBatchDialogOpen(false);
+            setBatchFilter('all');
+            await loadData();
+        } catch (err) {
+            toast.error('Greška pri brisanju batch-a');
+        } finally {
+            setDeleting(false);
+        }
+    };
+
     // Single email search
     const handleEmailSearchClick = (transaction) => {
         setSelectedTransaction(transaction);
