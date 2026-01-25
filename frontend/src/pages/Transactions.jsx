@@ -20,6 +20,7 @@ import {
     DialogFooter,
 } from '../components/ui/dialog';
 import { Label } from '../components/ui/label';
+import { ScrollArea } from '../components/ui/scroll-area';
 import { 
     FileText, 
     Search, 
@@ -28,14 +29,18 @@ import {
     Check,
     X,
     Filter,
-    Upload
+    Upload,
+    Mail,
+    FileDown,
+    Archive,
+    Loader2
 } from 'lucide-react';
-import { transactionApi } from '../lib/api';
+import { transactionApi, emailApi, exportApi } from '../lib/api';
 import { toast } from 'sonner';
-import { cn, getStatusLabel, getStatusClass, formatDate } from '../lib/utils';
+import { cn, getStatusLabel, getStatusClass } from '../lib/utils';
 
 export default function Transactions() {
-    const [searchParams, setSearchParams] = useSearchParams();
+    const [searchParams] = useSearchParams();
     const [transactions, setTransactions] = useState([]);
     const [batches, setBatches] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -47,6 +52,12 @@ export default function Transactions() {
     const [updateData, setUpdateData] = useState({ status: '', invoice_url: '' });
     const [uploading, setUploading] = useState(false);
     const [dragActive, setDragActive] = useState(false);
+    
+    // Email search state
+    const [emailSearchOpen, setEmailSearchOpen] = useState(false);
+    const [emailSearching, setEmailSearching] = useState(false);
+    const [emailResults, setEmailResults] = useState([]);
+    const [downloadingAttachment, setDownloadingAttachment] = useState(null);
 
     const loadData = useCallback(async () => {
         try {
@@ -160,14 +171,14 @@ export default function Transactions() {
         }
     };
 
-    const handleExport = async () => {
+    const handleExportCSV = async () => {
         if (batchFilter === 'all') {
             toast.error('Odaberite batch za export');
             return;
         }
 
         try {
-            const response = await transactionApi.exportCSV(batchFilter);
+            const response = await exportApi.csv(batchFilter);
             const url = window.URL.createObjectURL(new Blob([response.data]));
             const link = document.createElement('a');
             link.href = url;
@@ -179,6 +190,75 @@ export default function Transactions() {
             toast.success('CSV exportiran');
         } catch (err) {
             toast.error('Greška pri exportu');
+        }
+    };
+
+    const handleExportZIP = async () => {
+        if (batchFilter === 'all') {
+            toast.error('Odaberite batch za export');
+            return;
+        }
+
+        try {
+            const response = await exportApi.zip(batchFilter);
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `racuni_${batchFilter.slice(0, 8)}.zip`);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+            toast.success('ZIP preuzet');
+        } catch (err) {
+            const message = err.response?.data?.detail || 'Nema preuzetih računa za download';
+            toast.error(message);
+        }
+    };
+
+    // Email search functions
+    const handleEmailSearchClick = (transaction) => {
+        setSelectedTransaction(transaction);
+        setEmailResults([]);
+        setEmailSearchOpen(true);
+    };
+
+    const handleEmailSearch = async () => {
+        if (!selectedTransaction) return;
+
+        setEmailSearching(true);
+        try {
+            const response = await emailApi.search(selectedTransaction.primatelj);
+            setEmailResults(response.data.results || []);
+            if (response.data.results?.length === 0) {
+                toast.info('Nisu pronađeni emailovi za ovog dobavljača');
+            }
+        } catch (err) {
+            const message = err.response?.data?.detail || 'Greška pri pretraživanju';
+            toast.error(message);
+        } finally {
+            setEmailSearching(false);
+        }
+    };
+
+    const handleDownloadAttachment = async (emailId, filename) => {
+        if (!selectedTransaction) return;
+
+        setDownloadingAttachment(`${emailId}-${filename}`);
+        try {
+            const response = await emailApi.downloadAttachment(
+                emailId,
+                filename,
+                selectedTransaction.id
+            );
+            toast.success(response.data.message);
+            setEmailSearchOpen(false);
+            await loadData();
+        } catch (err) {
+            const message = err.response?.data?.detail || 'Greška pri preuzimanju';
+            toast.error(message);
+        } finally {
+            setDownloadingAttachment(null);
         }
     };
 
@@ -205,7 +285,7 @@ export default function Transactions() {
                             Pregledajte i upravljajte svojim transakcijama
                         </p>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                         <Button 
                             variant="outline"
                             onClick={() => document.getElementById('csv-upload-trans').click()}
@@ -224,12 +304,21 @@ export default function Transactions() {
                             disabled={uploading}
                         />
                         <Button
-                            onClick={handleExport}
+                            variant="outline"
+                            onClick={handleExportCSV}
                             disabled={batchFilter === 'all'}
                             data-testid="export-csv-btn"
                         >
-                            <Download className="h-4 w-4 mr-2" />
-                            Exportiraj CSV
+                            <FileDown className="h-4 w-4 mr-2" />
+                            CSV
+                        </Button>
+                        <Button
+                            onClick={handleExportZIP}
+                            disabled={batchFilter === 'all'}
+                            data-testid="export-zip-btn"
+                        >
+                            <Archive className="h-4 w-4 mr-2" />
+                            ZIP Računi
                         </Button>
                     </div>
                 </div>
@@ -357,6 +446,16 @@ export default function Transactions() {
                                                                 variant="ghost"
                                                                 size="sm"
                                                                 className="h-8 w-8 p-0"
+                                                                onClick={() => handleEmailSearchClick(t)}
+                                                                title="Pretraži email"
+                                                                data-testid={`search-email-${t.id}`}
+                                                            >
+                                                                <Mail className="h-4 w-4 text-primary" />
+                                                            </Button>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                className="h-8 w-8 p-0"
                                                                 onClick={() => handleQuickStatus(t, 'downloaded')}
                                                                 title="Označi kao preuzeto"
                                                                 data-testid={`mark-downloaded-${t.id}`}
@@ -462,6 +561,120 @@ export default function Transactions() {
                         </Button>
                         <Button onClick={handleUpdateSubmit} data-testid="update-submit-btn">
                             Spremi
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Email Search Dialog */}
+            <Dialog open={emailSearchOpen} onOpenChange={setEmailSearchOpen}>
+                <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Mail className="h-5 w-5" />
+                            Pretraži email za račun
+                        </DialogTitle>
+                        <DialogDescription>
+                            Pretraživanje za: <strong>{selectedTransaction?.primatelj}</strong>
+                        </DialogDescription>
+                    </DialogHeader>
+                    
+                    <div className="py-4">
+                        <Button 
+                            onClick={handleEmailSearch} 
+                            disabled={emailSearching}
+                            className="w-full"
+                            data-testid="email-search-btn"
+                        >
+                            {emailSearching ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Pretraživanje...
+                                </>
+                            ) : (
+                                <>
+                                    <Search className="h-4 w-4 mr-2" />
+                                    Pretraži emailove
+                                </>
+                            )}
+                        </Button>
+
+                        {emailResults.length > 0 && (
+                            <ScrollArea className="h-[300px] mt-4 rounded-md border">
+                                <div className="p-4 space-y-3">
+                                    {emailResults.map((email, idx) => (
+                                        <div 
+                                            key={idx}
+                                            className="p-3 rounded-lg bg-muted/50 space-y-2"
+                                        >
+                                            <div className="flex items-start justify-between gap-2">
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="font-medium text-sm truncate">
+                                                        {email.subject}
+                                                    </p>
+                                                    <p className="text-xs text-muted-foreground truncate">
+                                                        Od: {email.from}
+                                                    </p>
+                                                    <p className="text-xs text-muted-foreground">
+                                                        {email.date}
+                                                    </p>
+                                                </div>
+                                                {email.has_pdf && (
+                                                    <span className="status-pill status-found text-xs">
+                                                        PDF
+                                                    </span>
+                                                )}
+                                            </div>
+                                            
+                                            {email.attachments?.length > 0 && (
+                                                <div className="space-y-1">
+                                                    <p className="text-xs font-medium text-muted-foreground">
+                                                        Privici:
+                                                    </p>
+                                                    {email.attachments.map((att, attIdx) => (
+                                                        <div 
+                                                            key={attIdx}
+                                                            className="flex items-center justify-between gap-2 p-2 bg-background rounded"
+                                                        >
+                                                            <span className="text-xs truncate flex-1">
+                                                                {att.filename}
+                                                            </span>
+                                                            {att.is_pdf && (
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant="outline"
+                                                                    onClick={() => handleDownloadAttachment(email.email_id, att.filename)}
+                                                                    disabled={downloadingAttachment === `${email.email_id}-${att.filename}`}
+                                                                    data-testid={`download-attachment-${idx}-${attIdx}`}
+                                                                >
+                                                                    {downloadingAttachment === `${email.email_id}-${att.filename}` ? (
+                                                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                                                    ) : (
+                                                                        <Download className="h-3 w-3" />
+                                                                    )}
+                                                                </Button>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            </ScrollArea>
+                        )}
+
+                        {emailResults.length === 0 && !emailSearching && (
+                            <div className="text-center py-8 text-muted-foreground">
+                                <Mail className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                                <p>Kliknite "Pretraži emailove" za početak</p>
+                            </div>
+                        )}
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setEmailSearchOpen(false)}>
+                            Zatvori
                         </Button>
                     </DialogFooter>
                 </DialogContent>
