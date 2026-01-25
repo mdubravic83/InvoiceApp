@@ -74,6 +74,11 @@ export default function Transactions() {
     const [batchSearching, setBatchSearching] = useState(false);
     const [batchSearchResults, setBatchSearchResults] = useState([]);
     const [batchSearchProgress, setBatchSearchProgress] = useState(0);
+    
+    // Delete state
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const [deleteBatchDialogOpen, setDeleteBatchDialogOpen] = useState(false);
 
     const loadData = useCallback(async () => {
         try {
