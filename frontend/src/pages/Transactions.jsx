@@ -362,9 +362,14 @@ export default function Transactions() {
 
     // Batch search
     const handleBatchSearch = async () => {
+        const MAX_BATCH = 15;
         if (selectedIds.size === 0) {
             toast.error('Odaberite transakcije za pretragu');
             return;
+        }
+        
+        if (selectedIds.size > MAX_BATCH) {
+            toast.warning(`Maksimalno ${MAX_BATCH} transakcija odjednom. Pretraživat će se prvih ${MAX_BATCH}.`);
         }
 
         setBatchSearchResults([]);
@@ -378,7 +383,13 @@ export default function Transactions() {
             setBatchSearchProgress(100);
             
             const foundCount = response.data.found_count || 0;
-            toast.success(`Pronađeno ${foundCount} od ${response.data.total_transactions} računa`);
+            const skipped = response.data.skipped || 0;
+            
+            let message = `Pronađeno ${foundCount} od ${response.data.total_transactions} računa`;
+            if (skipped > 0) {
+                message += ` (preskočeno ${skipped})`;
+            }
+            toast.success(message);
         } catch (err) {
             const message = err.response?.data?.detail || 'Greška pri pretraživanju';
             toast.error(message);
