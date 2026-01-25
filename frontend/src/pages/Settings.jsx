@@ -68,11 +68,27 @@ export default function Settings() {
             });
             toast.success('Postavke spremljene');
             setIsConfigured(true);
+            setConnectionTested(false);
             updateUser({ ...user, zoho_configured: true });
         } catch (err) {
             toast.error('Greška pri spremanju');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleTestConnection = async () => {
+        setTesting(true);
+        try {
+            const response = await emailApi.testConnection();
+            toast.success(response.data.message);
+            setConnectionTested(true);
+        } catch (err) {
+            const message = err.response?.data?.detail || 'Greška pri povezivanju';
+            toast.error(message);
+            setConnectionTested(false);
+        } finally {
+            setTesting(false);
         }
     };
 
