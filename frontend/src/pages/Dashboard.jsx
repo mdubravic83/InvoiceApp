@@ -247,7 +247,7 @@ export default function Dashboard() {
                         <CardContent>
                             <div
                                 className={cn(
-                                    "upload-zone",
+                                    "upload-zone relative",
                                     dragActive && "dragging"
                                 )}
                                 onDragEnter={handleDrag}
@@ -261,9 +261,10 @@ export default function Dashboard() {
                                     type="file"
                                     id="csv-upload"
                                     accept=".csv"
-                                    className="hidden"
+                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                                     onChange={handleFileChange}
                                     disabled={uploading}
+                                    data-testid="csv-upload-input"
                                 />
                                 <FileSpreadsheet className="h-10 w-10 mx-auto text-muted-foreground mb-2" />
                                 {uploading ? (
