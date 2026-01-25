@@ -683,7 +683,7 @@ class ZohoMailClient:
             except:
                 pass
     
-    def search_emails(self, search_term: str, date_from: str = None, date_to: str = None, folder: str = "INBOX"):
+    def search_emails(self, search_term: str, date_from: str = None, date_to: str = None, folder: str = "INBOX", ignore_date: bool = False):
         """Search for emails containing the search term"""
         if not self.connection:
             self.connect()
@@ -710,41 +710,81 @@ class ZohoMailClient:
             logger.warning(f"Could not create safe search term from: {search_term}")
             return []
         
-        # Build search criteria
-        search_criteria = []
+        logger.info(f"Searching for: '{safe_search}' (original: '{search_term}')")
         
-        # Search in subject and from
-        if safe_search:
-            # IMAP search is limited, we'll search by subject OR from
-            search_criteria.append(f'(OR SUBJECT "{safe_search}" FROM "{safe_search}")')
+        # Try multiple search strategies
+        all_results = []
+        seen_ids = set()
         
-        if date_from:
-            search_criteria.append(f'SINCE {date_from}')
-        if date_to:
-            search_criteria.append(f'BEFORE {date_to}')
-        
-        search_string = ' '.join(search_criteria) if search_criteria else 'ALL'
-        
+        # Strategy 1: Search in SUBJECT
         try:
-            # First try with search term
-            status, messages = self.connection.search(None, search_string)
-            if status != 'OK':
-                return []
+            search_str = f'SUBJECT "{safe_search}"'
+            if not ignore_date and date_from:
+                search_str += f' SINCE {date_from}'
+            if not ignore_date and date_to:
+                search_str += f' BEFORE {date_to}'
             
-            email_ids = messages[0].split()
-            # Limit to last 20 emails for performance
-            email_ids = email_ids[-20:]
+            status, messages = self.connection.search(None, search_str)
+            if status == 'OK' and messages[0]:
+                for eid in messages[0].split()[-10:]:
+                    if eid not in seen_ids:
+                        seen_ids.add(eid)
+                        all_results.append(eid)
+        except Exception as e:
+            logger.error(f"Subject search error: {e}")
+        
+        # Strategy 2: Search in FROM
+        try:
+            search_str = f'FROM "{safe_search}"'
+            if not ignore_date and date_from:
+                search_str += f' SINCE {date_from}'
+            if not ignore_date and date_to:
+                search_str += f' BEFORE {date_to}'
             
-            results = []
-            for email_id in email_ids:
-                try:
-                    status, msg_data = self.connection.fetch(email_id, '(RFC822.HEADER)')
-                    if status != 'OK':
-                        continue
-                    
-                    for response_part in msg_data:
-                        if isinstance(response_part, tuple):
-                            msg = email.message_from_bytes(response_part[1])
+            status, messages = self.connection.search(None, search_str)
+            if status == 'OK' and messages[0]:
+                for eid in messages[0].split()[-10:]:
+                    if eid not in seen_ids:
+                        seen_ids.add(eid)
+                        all_results.append(eid)
+        except Exception as e:
+            logger.error(f"From search error: {e}")
+        
+        # Strategy 3: If no results with date, try without date filter
+        if not all_results and (date_from or date_to):
+            try:
+                # Try subject without date
+                status, messages = self.connection.search(None, f'SUBJECT "{safe_search}"')
+                if status == 'OK' and messages[0]:
+                    for eid in messages[0].split()[-10:]:
+                        if eid not in seen_ids:
+                            seen_ids.add(eid)
+                            all_results.append(eid)
+                
+                # Try from without date
+                status, messages = self.connection.search(None, f'FROM "{safe_search}"')
+                if status == 'OK' and messages[0]:
+                    for eid in messages[0].split()[-10:]:
+                        if eid not in seen_ids:
+                            seen_ids.add(eid)
+                            all_results.append(eid)
+            except Exception as e:
+                logger.error(f"No-date search error: {e}")
+        
+        # Limit results
+        email_ids = all_results[-20:]
+        logger.info(f"Found {len(email_ids)} emails for '{safe_search}'")
+        
+        results = []
+        for email_id in email_ids:
+            try:
+                status, msg_data = self.connection.fetch(email_id, '(RFC822.HEADER)')
+                if status != 'OK':
+                    continue
+                
+                for response_part in msg_data:
+                    if isinstance(response_part, tuple):
+                        msg = email.message_from_bytes(response_part[1])
                             
                             # Decode subject
                             subject = ""
