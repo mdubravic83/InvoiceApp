@@ -1000,7 +1000,7 @@ async def batch_search_emails(
         results = []
         for idx, trans in enumerate(transactions):
             try:
-                # Parse date for search range (search around transaction date)
+                # Parse date for search range (search on exact date)
                 date_str = trans.get("datum_izvrsenja", "")
                 date_from = None
                 date_to = None
@@ -1010,12 +1010,12 @@ async def batch_search_emails(
                         # Try to parse date and create range
                         from datetime import datetime, timedelta
                         # Handle various date formats
-                        for fmt in ["%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y"]:
+                        for fmt in ["%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y"]:
                             try:
                                 trans_date = datetime.strptime(date_str.strip(), fmt)
-                                # Search 5 days before and after
-                                date_from = (trans_date - timedelta(days=5)).strftime("%d-%b-%Y")
-                                date_to = (trans_date + timedelta(days=5)).strftime("%d-%b-%Y")
+                                # Search on exact day (from that day to next day)
+                                date_from = trans_date.strftime("%d-%b-%Y")
+                                date_to = (trans_date + timedelta(days=1)).strftime("%d-%b-%Y")
                                 break
                             except:
                                 continue
