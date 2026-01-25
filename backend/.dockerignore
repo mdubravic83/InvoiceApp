@@ -1,0 +1,13 @@
+# Docker ignore file
+__pycache__
+*.pyc
+*.pyo
+.git
+.gitignore
+.env
+*.md
+.DS_Store
+venv
+.venv
+invoices/*
+!invoices/.gitkeep

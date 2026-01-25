@@ -1,0 +1,77 @@
+version: '3.8'
+
+# Simplified docker-compose for Contabo/Plesk deployment
+# This version uses a single nginx as reverse proxy
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:6
+    container_name: finzen-mongodb
+    restart: always
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=finzen
+    networks:
+      - finzen-network
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: finzen-backend
+    restart: always
+    depends_on:
+      - mongodb
+    environment:
+      - MONGO_URL=mongodb://mongodb:27017
+      - DB_NAME=finzen
+      - JWT_SECRET=${JWT_SECRET}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+    volumes:
+      - invoices_data:/app/invoices
+    networks:
+      - finzen-network
+    expose:
+      - "8001"
+
+  # React Frontend (static build served by nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - REACT_APP_BACKEND_URL=${PUBLIC_URL}/api
+    container_name: finzen-frontend
+    restart: always
+    networks:
+      - finzen-network
+    expose:
+      - "80"
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: finzen-nginx
+    restart: always
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    networks:
+      - finzen-network
+
+volumes:
+  mongodb_data:
+  invoices_data:
+
+networks:
+  finzen-network:
+    driver: bridge
