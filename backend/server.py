@@ -42,7 +42,8 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
 
 app = FastAPI(title="FinZen API", version="1.0.0")
-api_router = APIRouter(prefix="/api")
+# Define router without prefix so we can mount it at both '/api' and root
+api_router = APIRouter()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
