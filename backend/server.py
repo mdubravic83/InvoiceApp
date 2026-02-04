@@ -1358,7 +1358,8 @@ async def root():
 async def health():
     return {"status": "healthy"}
 
-# Include router
+# Include router at root for backward compatibility (optional)
+# This makes endpoints also available without /api prefix, e.g. /auth/register
 app.include_router(api_router)
 
 app.add_middleware(
