@@ -1342,6 +1342,10 @@ async def export_zip(batch_id: str, user: dict = Depends(get_current_user)):
         zip_buffer,
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename=racuni_{batch_name}.zip"}
+# Mount API router at /api prefix (main usage)
+app.include_router(api_router, prefix="/api")
+
+
     )
 
 # ============== ROOT ==============
