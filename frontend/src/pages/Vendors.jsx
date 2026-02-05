@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -14,19 +15,21 @@ import {
     DialogFooter,
 } from '../components/ui/dialog';
 import { 
-    Users, 
-    Plus, 
-    Pencil, 
-    Trash2, 
+    Users,
+    Plus,
+    Pencil,
+    Trash2,
     ExternalLink,
     Tag,
-    FileText
+    FileText,
+    Bot
 } from 'lucide-react';
 import { vendorApi } from '../lib/api';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
 
 export default function Vendors() {
+    const navigate = useNavigate();
     const [vendors, setVendors] = useState([]);
     const [loading, setLoading] = useState(true);
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -264,6 +267,16 @@ export default function Vendors() {
                                             Nema dodatnih informacija
                                         </p>
                                     )}
+
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="w-full mt-3"
+                                        onClick={() => navigate('/recipes')}
+                                    >
+                                        <Bot className="h-3.5 w-3.5 mr-1.5" />
+                                        Automatizacija
+                                    </Button>
                                 </CardContent>
                             </Card>
                         ))}

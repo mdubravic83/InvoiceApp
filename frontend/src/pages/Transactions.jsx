@@ -42,6 +42,7 @@ import {
     Trash2
 } from 'lucide-react';
 import { transactionApi, emailApi, exportApi, invoiceApi } from '../lib/api';
+import { PdfPreviewDialog } from '../components/PdfPreview';
 import { toast } from 'sonner';
 import { cn, getStatusLabel, getStatusClass } from '../lib/utils';
 
@@ -75,6 +76,10 @@ export default function Transactions() {
     const [batchSearchResults, setBatchSearchResults] = useState([]);
     const [batchSearchProgress, setBatchSearchProgress] = useState(0);
     
+    // PDF preview state
+    const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
+    const [pdfPreviewTransaction, setPdfPreviewTransaction] = useState(null);
+
     // Delete state
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -719,16 +724,31 @@ export default function Transactions() {
                                             </td>
                                             <td className="p-4 text-center">
                                                 {(t.status === 'downloaded' || t.invoice_path) && (
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        className="h-8 w-8 p-0"
-                                                        onClick={() => handleDownloadInvoice(t)}
-                                                        title="Preuzmi račun"
-                                                        data-testid={`download-invoice-${t.id}`}
-                                                    >
-                                                        <File className="h-4 w-4 text-primary" />
-                                                    </Button>
+                                                    <div className="flex items-center justify-center gap-1">
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-8 w-8 p-0"
+                                                            onClick={() => {
+                                                                setPdfPreviewTransaction(t);
+                                                                setPdfPreviewOpen(true);
+                                                            }}
+                                                            title="Pregled računa"
+                                                            data-testid={`preview-invoice-${t.id}`}
+                                                        >
+                                                            <FileText className="h-4 w-4 text-primary" />
+                                                        </Button>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-8 w-8 p-0"
+                                                            onClick={() => handleDownloadInvoice(t)}
+                                                            title="Preuzmi račun"
+                                                            data-testid={`download-invoice-${t.id}`}
+                                                        >
+                                                            <Download className="h-4 w-4 text-muted-foreground" />
+                                                        </Button>
+                                                    </div>
                                                 )}
                                                 {t.invoice_url && !t.invoice_path && (
                                                     <Button
@@ -1185,6 +1205,12 @@ export default function Transactions() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <PdfPreviewDialog
+                open={pdfPreviewOpen}
+                onOpenChange={setPdfPreviewOpen}
+                transaction={pdfPreviewTransaction}
+            />
         </Layout>
     );
 }

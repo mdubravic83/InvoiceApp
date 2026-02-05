@@ -3,6 +3,7 @@ import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { ThemeProvider } from "./context/ThemeContext";
 
 // Pages
 import Login from "./pages/Login";
@@ -11,6 +12,7 @@ import Dashboard from "./pages/Dashboard";
 import Transactions from "./pages/Transactions";
 import Vendors from "./pages/Vendors";
 import Settings from "./pages/Settings";
+import Recipes from "./pages/Recipes";
 
 // Protected Route component
 const ProtectedRoute = ({ children }) => {
@@ -97,6 +99,14 @@ function AppRoutes() {
                 }
             />
             <Route
+                path="/recipes"
+                element={
+                    <ProtectedRoute>
+                        <Recipes />
+                    </ProtectedRoute>
+                }
+            />
+            <Route
                 path="/settings"
                 element={
                     <ProtectedRoute>
@@ -114,21 +124,23 @@ function AppRoutes() {
 
 function App() {
     return (
-        <AuthProvider>
-            <BrowserRouter>
-                <AppRoutes />
-                <Toaster 
-                    position="top-right" 
-                    richColors 
-                    closeButton
-                    toastOptions={{
-                        style: {
-                            fontFamily: 'Inter, sans-serif',
-                        },
-                    }}
-                />
-            </BrowserRouter>
-        </AuthProvider>
+        <ThemeProvider>
+            <AuthProvider>
+                <BrowserRouter>
+                    <AppRoutes />
+                    <Toaster
+                        position="top-right"
+                        richColors
+                        closeButton
+                        toastOptions={{
+                            style: {
+                                fontFamily: 'Inter, sans-serif',
+                            },
+                        }}
+                    />
+                </BrowserRouter>
+            </AuthProvider>
+        </ThemeProvider>
     );
 }
 

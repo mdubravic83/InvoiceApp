@@ -632,13 +632,15 @@ async def export_csv(batch_id: str, user: dict = Depends(get_current_user)):
         ])
     
     output.seek(0)
+    batch = await db.batches.find_one({"id": batch_id, "user_id": user["id"]}, {"_id": 0})
+    batch_name = f"{batch['month']}_{batch['year']}" if batch else batch_id[:8]
     return StreamingResponse(
-    zip_stream,
-    media_type="application/zip",
-    headers={
-        "Content-Disposition": f"attachment; filename=racuni_{batch_name}.zip"
-    },
-)
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=transakcije_{batch_name}.csv"
+        },
+    )
 
 
 # ============== ZOHO MAIL IMAP INTEGRATION ==============
@@ -1345,11 +1347,210 @@ async def export_zip(batch_id: str, user: dict = Depends(get_current_user)):
         zip_buffer,
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename=racuni_{batch_name}.zip"}
-# Mount API router at /api prefix (main usage)
-app.include_router(api_router, prefix="/api")
-
-
     )
+
+# ============== RECIPE ROUTES (Vendor Download Automation) ==============
+
+class RecipeCreate(BaseModel):
+    vendor_name: str
+    login_url: str = ""
+    description: str = ""
+    credentials_email: str = ""
+    credentials_note: str = ""
+    is_active: bool = True
+
+class RecipeStepData(BaseModel):
+    step_type: str = "navigate"
+    selector: str = ""
+    value: str = ""
+    description: str = ""
+    wait_seconds: int = 2
+    is_optional: bool = False
+    step_order: int = 0
+
+class SaveStepsRequest(BaseModel):
+    steps: List[RecipeStepData]
+
+@api_router.get("/recipes")
+async def get_recipes(user: dict = Depends(get_current_user)):
+    recipes = await db.recipes.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    for r in recipes:
+        if isinstance(r.get('created_at'), str):
+            r['created_at'] = datetime.fromisoformat(r['created_at'])
+        step_count = await db.recipe_steps.count_documents({"recipe_id": r["id"]})
+        r["step_count"] = step_count
+    return recipes
+
+@api_router.get("/recipes/{recipe_id}")
+async def get_recipe(recipe_id: str, user: dict = Depends(get_current_user)):
+    recipe = await db.recipes.find_one({"id": recipe_id, "user_id": user["id"]}, {"_id": 0})
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recept nije pronadjen")
+    step_count = await db.recipe_steps.count_documents({"recipe_id": recipe_id})
+    recipe["step_count"] = step_count
+    return recipe
+
+@api_router.post("/recipes")
+async def create_recipe(data: RecipeCreate, user: dict = Depends(get_current_user)):
+    recipe_id = str(uuid.uuid4())
+    recipe_doc = {
+        "id": recipe_id,
+        "user_id": user["id"],
+        "vendor_name": data.vendor_name,
+        "login_url": data.login_url,
+        "description": data.description,
+        "credentials_email": data.credentials_email,
+        "credentials_note": data.credentials_note,
+        "is_active": data.is_active,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.recipes.insert_one(recipe_doc)
+    return {"id": recipe_id, "message": "Recept kreiran"}
+
+@api_router.put("/recipes/{recipe_id}")
+async def update_recipe(recipe_id: str, data: RecipeCreate, user: dict = Depends(get_current_user)):
+    result = await db.recipes.update_one(
+        {"id": recipe_id, "user_id": user["id"]},
+        {"$set": {
+            "vendor_name": data.vendor_name,
+            "login_url": data.login_url,
+            "description": data.description,
+            "credentials_email": data.credentials_email,
+            "credentials_note": data.credentials_note,
+            "is_active": data.is_active,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Recept nije pronadjen")
+    return {"message": "Recept azuriran"}
+
+@api_router.delete("/recipes/{recipe_id}")
+async def delete_recipe(recipe_id: str, user: dict = Depends(get_current_user)):
+    result = await db.recipes.delete_one({"id": recipe_id, "user_id": user["id"]})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Recept nije pronadjen")
+    await db.recipe_steps.delete_many({"recipe_id": recipe_id})
+    await db.recipe_runs.delete_many({"recipe_id": recipe_id})
+    return {"message": "Recept obrisan"}
+
+@api_router.get("/recipes/{recipe_id}/steps")
+async def get_recipe_steps(recipe_id: str, user: dict = Depends(get_current_user)):
+    recipe = await db.recipes.find_one({"id": recipe_id, "user_id": user["id"]}, {"_id": 0})
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recept nije pronadjen")
+    steps = await db.recipe_steps.find({"recipe_id": recipe_id}, {"_id": 0}).sort("step_order", 1).to_list(100)
+    return steps
+
+@api_router.put("/recipes/{recipe_id}/steps")
+async def save_recipe_steps(recipe_id: str, data: SaveStepsRequest, user: dict = Depends(get_current_user)):
+    recipe = await db.recipes.find_one({"id": recipe_id, "user_id": user["id"]}, {"_id": 0})
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recept nije pronadjen")
+    await db.recipe_steps.delete_many({"recipe_id": recipe_id})
+    if data.steps:
+        step_docs = []
+        for i, step in enumerate(data.steps):
+            step_docs.append({
+                "id": str(uuid.uuid4()),
+                "recipe_id": recipe_id,
+                "step_order": i,
+                "step_type": step.step_type,
+                "selector": step.selector,
+                "value": step.value,
+                "description": step.description,
+                "wait_seconds": step.wait_seconds,
+                "is_optional": step.is_optional,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+        await db.recipe_steps.insert_many(step_docs)
+    return {"message": f"Spremljeno {len(data.steps)} koraka"}
+
+@api_router.post("/recipes/{recipe_id}/run")
+async def run_recipe(recipe_id: str, user: dict = Depends(get_current_user)):
+    recipe = await db.recipes.find_one({"id": recipe_id, "user_id": user["id"]}, {"_id": 0})
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recept nije pronadjen")
+    if not recipe.get("is_active"):
+        raise HTTPException(status_code=400, detail="Recept nije aktivan")
+    steps = await db.recipe_steps.find({"recipe_id": recipe_id}, {"_id": 0}).sort("step_order", 1).to_list(100)
+    if not steps:
+        raise HTTPException(status_code=400, detail="Recept nema definiranih koraka")
+    run_id = str(uuid.uuid4())
+    run_doc = {
+        "id": run_id,
+        "recipe_id": recipe_id,
+        "user_id": user["id"],
+        "status": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+        "result_message": "",
+        "downloaded_files": 0,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.recipe_runs.insert_one(run_doc)
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client_http:
+            session_cookies = {}
+            downloaded = 0
+            for step in steps:
+                step_type = step["step_type"]
+                if step_type == "navigate":
+                    url = step.get("value", "")
+                    if url:
+                        resp = await client_http.get(url, cookies=session_cookies)
+                        session_cookies.update(dict(resp.cookies))
+                elif step_type == "download_pdf":
+                    url = step.get("value", "")
+                    if url:
+                        resp = await client_http.get(url, cookies=session_cookies)
+                        if resp.status_code == 200 and len(resp.content) > 100:
+                            safe_name = re.sub(r'[^\w\-_\.]', '_', recipe["vendor_name"])
+                            filename = f"{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                            file_path = INVOICES_DIR / f"{user['id']}_{filename}"
+                            with open(file_path, 'wb') as f:
+                                f.write(resp.content)
+                            downloaded += 1
+            await db.recipe_runs.update_one(
+                {"id": run_id},
+                {"$set": {
+                    "status": "success",
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "result_message": f"Uspjesno izvrseno. Preuzeto {downloaded} datoteka.",
+                    "downloaded_files": downloaded
+                }}
+            )
+            return {
+                "status": "success",
+                "run_id": run_id,
+                "downloaded_files": downloaded,
+                "result_message": f"Uspjesno izvrseno. Preuzeto {downloaded} datoteka."
+            }
+    except Exception as e:
+        error_msg = str(e)
+        await db.recipe_runs.update_one(
+            {"id": run_id},
+            {"$set": {
+                "status": "failed",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "result_message": f"Greska: {error_msg}"
+            }}
+        )
+        return {
+            "status": "failed",
+            "run_id": run_id,
+            "downloaded_files": 0,
+            "result_message": f"Greska pri izvrsavanju: {error_msg}"
+        }
+
+@api_router.get("/recipes/{recipe_id}/runs")
+async def get_recipe_runs(recipe_id: str, user: dict = Depends(get_current_user)):
+    runs = await db.recipe_runs.find(
+        {"recipe_id": recipe_id, "user_id": user["id"]},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
+    return runs
 
 # ============== ROOT ==============
 
@@ -1361,8 +1562,7 @@ async def root():
 async def health():
     return {"status": "healthy"}
 
-# Include router at root for backward compatibility (optional)
-# This makes endpoints also available without /api prefix, e.g. /auth/register
+app.include_router(api_router, prefix="/api")
 app.include_router(api_router)
 
 app.add_middleware(
