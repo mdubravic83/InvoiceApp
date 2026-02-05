@@ -1,0 +1,14 @@
+{
+  "name": "finzen",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "postinstall": "cd frontend && npm install --legacy-peer-deps",
+    "start": "cd frontend && npx craco start",
+    "build": "cd frontend && npx craco build",
+    "test": "cd frontend && npx craco test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
