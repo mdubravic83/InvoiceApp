@@ -633,10 +633,13 @@ async def export_csv(batch_id: str, user: dict = Depends(get_current_user)):
     
     output.seek(0)
     return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=racuni_{batch_id[:8]}.csv"}
-    )
+    zip_stream,
+    media_type="application/zip",
+    headers={
+        "Content-Disposition": f"attachment; filename=racuni_{batch_name}.zip"
+    },
+)
+
 
 # ============== ZOHO MAIL IMAP INTEGRATION ==============
 

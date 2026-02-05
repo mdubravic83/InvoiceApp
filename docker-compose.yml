@@ -12,10 +12,6 @@ services:
       - MONGO_INITDB_DATABASE=finzen
     networks:
       - finzen-network
-    # Uncomment below for MongoDB authentication (recommended for production)
-    # environment:
-    #   - MONGO_INITDB_ROOT_USERNAME=admin
-    #   - MONGO_INITDB_ROOT_PASSWORD=your_secure_password
 
   # FastAPI Backend
   backend:
@@ -35,38 +31,22 @@ services:
       - invoices_data:/app/invoices
     networks:
       - finzen-network
-    # Internal port - not exposed directly, accessed via nginx
+    # backend je dostupan drugim servisima na http://backend:8001
+    # (port 8001 dolazi iz uvicorn CMD u backend Dockerfile-u)
 
-  # React Frontend + Nginx Reverse Proxy
+  # React Frontend (serviran iz Nginxa unutar tog istog imagea)
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - REACT_APP_BACKEND_URL=${PUBLIC_URL:-http://localhost}/api
+        - REACT_APP_BACKEND_URL=http://backend:8001/api
     container_name: finzen-frontend
     restart: always
     depends_on:
       - backend
     ports:
-      - "${PORT:-80}:80"
-    networks:
-      - finzen-network
-
-  # Nginx Reverse Proxy (combines frontend + backend)
-  nginx:
-    image: nginx:alpine
-    container_name: finzen-nginx
-    restart: always
-    depends_on:
-      - backend
-      - frontend
-    ports:
-      - "${PORT:-80}:80"
-      - "${SSL_PORT:-443}:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro  # For SSL certificates
+      - "80:80"
     networks:
       - finzen-network
 
@@ -79,3 +59,4 @@ volumes:
 networks:
   finzen-network:
     driver: bridge
+
