@@ -5,7 +5,7 @@
   "scripts": {
     "postinstall": "cd frontend && npm install --legacy-peer-deps",
     "start": "cd frontend && npx craco start",
-    "build": "cd frontend && npx craco build && cd .. && rm -rf build static && cp -r frontend/build ./build && cp build/index.html ./ && cp build/asset-manifest.json ./ && cp -r build/static ./",
+    "build": "cd frontend && npx craco build && cd .. && rm -rf static && cp -r frontend/build ./build && cp build/index.html ./ && cp build/asset-manifest.json ./ && cp -r build/static ./",
     "test": "cd frontend && npx craco test"
   },
   "engines": {
