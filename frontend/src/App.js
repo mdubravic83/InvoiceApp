@@ -1,135 +1,54 @@
-import React from "react";
+import { useEffect } from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { Toaster } from "sonner";
-import { AuthProvider, useAuth } from "./context/AuthContext";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import axios from "axios";
 
-// Pages
-import Login from "./pages/Login";
-import Register from "./pages/Register";
-import Dashboard from "./pages/Dashboard";
-import Transactions from "./pages/Transactions";
-import Vendors from "./pages/Vendors";
-import Settings from "./pages/Settings";
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const API = `${BACKEND_URL}/api`;
 
-// Protected Route component
-const ProtectedRoute = ({ children }) => {
-    const { isAuthenticated, loading } = useAuth();
-
-    if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-background">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-            </div>
-        );
+const Home = () => {
+  const helloWorldApi = async () => {
+    try {
+      const response = await axios.get(`${API}/`);
+      console.log(response.data.message);
+    } catch (e) {
+      console.error(e, `errored out requesting / api`);
     }
+  };
 
-    if (!isAuthenticated) {
-        return <Navigate to="/login" replace />;
-    }
+  useEffect(() => {
+    helloWorldApi();
+  }, []);
 
-    return children;
+  return (
+    <div>
+      <header className="App-header">
+        <a
+          className="App-link"
+          href="https://emergent.sh"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <img src="https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4" />
+        </a>
+        <p className="mt-5">Building something incredible ~!</p>
+      </header>
+    </div>
+  );
 };
-
-// Public Route component (redirect if authenticated)
-const PublicRoute = ({ children }) => {
-    const { isAuthenticated, loading } = useAuth();
-
-    if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-background">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-            </div>
-        );
-    }
-
-    if (isAuthenticated) {
-        return <Navigate to="/dashboard" replace />;
-    }
-
-    return children;
-};
-
-function AppRoutes() {
-    return (
-        <Routes>
-            {/* Public routes */}
-            <Route
-                path="/login"
-                element={
-                    <PublicRoute>
-                        <Login />
-                    </PublicRoute>
-                }
-            />
-            <Route
-                path="/register"
-                element={
-                    <PublicRoute>
-                        <Register />
-                    </PublicRoute>
-                }
-            />
-
-            {/* Protected routes */}
-            <Route
-                path="/dashboard"
-                element={
-                    <ProtectedRoute>
-                        <Dashboard />
-                    </ProtectedRoute>
-                }
-            />
-            <Route
-                path="/transactions"
-                element={
-                    <ProtectedRoute>
-                        <Transactions />
-                    </ProtectedRoute>
-                }
-            />
-            <Route
-                path="/vendors"
-                element={
-                    <ProtectedRoute>
-                        <Vendors />
-                    </ProtectedRoute>
-                }
-            />
-            <Route
-                path="/settings"
-                element={
-                    <ProtectedRoute>
-                        <Settings />
-                    </ProtectedRoute>
-                }
-            />
-
-            {/* Default redirect */}
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-        </Routes>
-    );
-}
 
 function App() {
-    return (
-        <AuthProvider>
-            <BrowserRouter>
-                <AppRoutes />
-                <Toaster 
-                    position="top-right" 
-                    richColors 
-                    closeButton
-                    toastOptions={{
-                        style: {
-                            fontFamily: 'Inter, sans-serif',
-                        },
-                    }}
-                />
-            </BrowserRouter>
-        </AuthProvider>
-    );
+  return (
+    <div className="App">
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Home />}>
+            <Route index element={<Home />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </div>
+  );
 }
 
 export default App;
