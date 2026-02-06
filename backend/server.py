@@ -1282,25 +1282,34 @@ async def download_invoice(transaction_id: str, user: dict = Depends(get_current
         {"id": transaction_id, "user_id": user["id"]},
         {"_id": 0}
     )
-    
+
     if not transaction:
         raise HTTPException(status_code=404, detail="Transakcija nije pronađena")
-    
+
     invoice_path = transaction.get("invoice_path")
-    if not invoice_path or not os.path.exists(invoice_path):
-        raise HTTPException(status_code=404, detail="Račun nije pronađen")
-    
+    if not invoice_path:
+        logger.error(f"Transaction {transaction_id} has no invoice_path")
+        raise HTTPException(status_code=404, detail="Putanja računa nije postavljena")
+
+    if not os.path.exists(invoice_path):
+        logger.error(f"Invoice file not found at path: {invoice_path}")
+        raise HTTPException(status_code=404, detail="Datoteka računa nije pronađena na serveru")
+
     filename = transaction.get("invoice_filename", "racun.pdf")
-    
-    def file_iterator():
-        with open(invoice_path, 'rb') as f:
-            yield from f
-    
-    return StreamingResponse(
-        file_iterator(),
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
+
+    try:
+        def file_iterator():
+            with open(invoice_path, 'rb') as f:
+                yield from f
+
+        return StreamingResponse(
+            file_iterator(),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        logger.error(f"Error reading invoice file {invoice_path}: {e}")
+        raise HTTPException(status_code=500, detail="Greška pri čitanju datoteke")
 
 # ============== ZIP DOWNLOAD ==============
 
@@ -1309,40 +1318,51 @@ async def export_zip(batch_id: str, user: dict = Depends(get_current_user)):
     """Download all invoices from a batch as ZIP"""
     transactions = await db.transactions.find(
         {
-            "batch_id": batch_id, 
+            "batch_id": batch_id,
             "user_id": user["id"],
             "invoice_path": {"$exists": True, "$ne": None}
         },
         {"_id": 0}
     ).to_list(10000)
-    
+
     if not transactions:
         raise HTTPException(status_code=404, detail="Nema preuzetih računa za download")
-    
+
     # Create ZIP in memory
     zip_buffer = io.BytesIO()
-    
+    files_added = 0
+
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         for t in transactions:
             invoice_path = t.get("invoice_path")
             if invoice_path and os.path.exists(invoice_path):
-                # Create a nice filename
-                vendor_name = re.sub(r'[^\w\-_]', '_', t.get("primatelj", "unknown")[:30])
-                date_str = t.get("datum_izvrsenja", "").replace("-", "")
-                original_filename = t.get("invoice_filename", "racun.pdf")
-                ext = os.path.splitext(original_filename)[1] or ".pdf"
-                
-                archive_filename = f"{date_str}_{vendor_name}{ext}"
-                
-                with open(invoice_path, 'rb') as f:
-                    zip_file.writestr(archive_filename, f.read())
-    
+                try:
+                    # Create a nice filename
+                    vendor_name = re.sub(r'[^\w\-_]', '_', t.get("primatelj", "unknown")[:30])
+                    date_str = t.get("datum_izvrsenja", "").replace("-", "")
+                    original_filename = t.get("invoice_filename", "racun.pdf")
+                    ext = os.path.splitext(original_filename)[1] or ".pdf"
+
+                    archive_filename = f"{date_str}_{vendor_name}{ext}"
+
+                    with open(invoice_path, 'rb') as f:
+                        zip_file.writestr(archive_filename, f.read())
+                    files_added += 1
+                except Exception as e:
+                    logger.error(f"Error adding file to ZIP: {invoice_path} - {e}")
+                    continue
+            else:
+                logger.warning(f"Invoice file not found: {invoice_path}")
+
+    if files_added == 0:
+        raise HTTPException(status_code=404, detail="Nijedna datoteka računa nije pronađena na serveru")
+
     zip_buffer.seek(0)
-    
+
     # Get batch info for filename
     batch = await db.batches.find_one({"id": batch_id, "user_id": user["id"]}, {"_id": 0})
     batch_name = f"{batch['month']}_{batch['year']}" if batch else batch_id[:8]
-    
+
     return StreamingResponse(
         zip_buffer,
         media_type="application/zip",
