@@ -1,7 +1,7 @@
-node_modules
 frontend/node_modules
 .git
-.env
+.env.local
+.env.development
 *.log
 .DS_Store
 backend
@@ -11,3 +11,4 @@ memory
 .emergent
 frontend/src
 frontend/public
+frontend/build

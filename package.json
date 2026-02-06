@@ -4,9 +4,13 @@
   "private": true,
   "scripts": {
     "postinstall": "cd frontend && npm install --legacy-peer-deps",
-    "start": "cd frontend && npx craco start",
+    "start": "node server.js",
+    "dev": "cd frontend && npx craco start",
     "build": "cd frontend && npx craco build && cd .. && rm -rf static index.html asset-manifest.json && cp frontend/build/index.html ./ && cp frontend/build/asset-manifest.json ./ && cp -r frontend/build/static ./ && echo 'Build completed. File structure:' && ls -la && ls -la static/",
     "test": "cd frontend && npx craco test"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
   },
   "engines": {
     "node": ">=18"
